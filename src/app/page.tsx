@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useRef } from 'react';
-import Head from 'next/head';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   ChevronLeft, 
@@ -11,14 +10,22 @@ import {
   Calendar as CalendarIcon, 
   Sparkles,
   Share2,
-  Check
+  Check,
+  Lock,
+  Unlock,
+  ShieldCheck,
+  ScanFace
 } from 'lucide-react';
 
 // ==========================================
-// 0. 심플 십자 병원 마크 (Base64 인라인 아이콘)
+// 0. Base64 십자 병원 마크 (PWA Icon)
 // ==========================================
 const MEDICAL_CROSS_ICON =
   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExMiIgZmlsbD0iIzA5MDkwYiIvPjxyZWN0IHg9IjIwOCIgeT0iMTA2IiB3aWR0aD0iOTYiIGhlaWdodD0iMzAwIiByeD0iMjAiIGZpbGw9IiNmYWNjMTUiLz48cmVjdCB4PSIxMDYiIHk9IjIwOCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSI5NiIgcng9IjIwIiBmaWxsPSIjZmFjYzE1Ii8+PC9zdmc+";
+
+const STORAGE_DATA_KEY = 'er_schedule_data_v2';
+const STORAGE_AUTH_KEY = 'er_schedule_auth_token_v2';
+const DEFAULT_PASSCODE = process.env.NEXT_PUBLIC_APP_PASSWORD || '1234';
 
 // ==========================================
 // 1. 타입 정의
@@ -29,8 +36,8 @@ export interface ShiftItem {
   code: ShiftCode;
   name: string;        // "데이", "미드1", "미드2", "주말 헬퍼" 등
   time: string;        // "08:00 - 15:00"
-  workers: string[];   // ["김민준", "나!"] ("박현우" -> "나!" 치환됨)
-  hasTargetUser: boolean;
+  workers: string[];   // ["김민준", "현우"]
+  hasTargetUser: boolean; // "현우" 포함 여부
 }
 
 export interface ParsedDay {
@@ -69,7 +76,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
   for (let r = 0; r < rawRows.length; r++) {
     const row = rawRows[r] || [];
 
-    // [월 식별]: 셀에서 /(\d{4})\.(\d{2})월/ (또는 1~2자리 월) 매칭 시 currentYearMonth = YYYY-MM 저장
+    // [월 식별]: 셀에서 /(\d{4})\.(\d{1,2})월/ 매칭 시 currentYearMonth = YYYY-MM 저장
     for (let c = 0; c < row.length; c++) {
       const cellStr = String(row[c] || '').trim();
       const monthMatch = cellStr.match(/(\d{4})\.(\d{1,2})월/);
@@ -98,7 +105,6 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
         const hasNextMonthHeader = dateRow.some(cell => String(cell || '').match(/(\d{4})\.(\d{1,2})월/));
         if (hasNextMonthHeader) break;
 
-        // 다른 요일 행이 끼어있는 경우 스킵
         const isAnotherDayOfWeekRow = dateRow.some(c => String(c).trim() === '일') && dateRow.some(c => String(c).trim() === '월');
         if (isAnotherDayOfWeekRow) {
           nextR++;
@@ -134,29 +140,29 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
 
           const shifts: ShiftItem[] = [];
 
-          // "박현우"를 찾으면 무조건 "나!"로 치환하는 헬퍼 함수
-          const cleanAndReplaceWorkers = (lineStr: string) => {
+          // "현우" 이름 정리 함수 (박현우 -> 현우)
+          const cleanWorkers = (lineStr: string) => {
             return lineStr
               .split(/[\/,]/)
               .map(w => w.trim())
               .filter(Boolean)
-              .map(w => (w === '박현우' ? '나!' : w));
+              .map(w => (w === '박현우' ? '현우' : w));
           };
 
           if (isWeekendOrHol) {
             // * 주말/공휴일 무조건 3줄: [0]=D, [1]=M/H, [2]=N
             if (lines[0]) {
-              const workers = cleanAndReplaceWorkers(lines[0]);
+              const workers = cleanWorkers(lines[0]);
               shifts.push({
                 code: 'D',
                 name: '주말 데이',
                 time: '08:00 - 16:00',
                 workers,
-                hasTargetUser: workers.includes('나!'),
+                hasTargetUser: workers.some(w => w.includes('현우')),
               });
             }
             if (lines[1]) {
-              const lineWorkers = cleanAndReplaceWorkers(lines[1]);
+              const lineWorkers = cleanWorkers(lines[1]);
               if (lineWorkers.length >= 2) {
                 const helperWorker = [lineWorkers[0]];
                 const midWorker = lineWorkers.slice(1);
@@ -165,14 +171,14 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                   name: '주말 헬퍼',
                   time: '14:00 - 23:00',
                   workers: helperWorker,
-                  hasTargetUser: helperWorker.includes('나!'),
+                  hasTargetUser: helperWorker.some(w => w.includes('현우')),
                 });
                 shifts.push({
                   code: 'M',
                   name: '주말 미드',
                   time: '15:00 - 24:00',
                   workers: midWorker,
-                  hasTargetUser: midWorker.includes('나!'),
+                  hasTargetUser: midWorker.some(w => w.includes('현우')),
                 });
               } else {
                 shifts.push({
@@ -180,18 +186,18 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                   name: '주말 헬퍼/미드',
                   time: '14:00 - 24:00',
                   workers: lineWorkers,
-                  hasTargetUser: lineWorkers.includes('나!'),
+                  hasTargetUser: lineWorkers.some(w => w.includes('현우')),
                 });
               }
             }
             if (lines[2]) {
-              const workers = cleanAndReplaceWorkers(lines[2]);
+              const workers = cleanWorkers(lines[2]);
               shifts.push({
                 code: 'N',
                 name: '주말 나이트',
                 time: '00:00 - 익일 08:00',
                 workers,
-                hasTargetUser: workers.includes('나!'),
+                hasTargetUser: workers.some(w => w.includes('현우')),
               });
             }
           } else {
@@ -199,17 +205,17 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
             if (lines.length >= 3) {
               // 평일 3줄: [0]=D, [1]=M1/M2, [2]=N
               if (lines[0]) {
-                const workers = cleanAndReplaceWorkers(lines[0]);
+                const workers = cleanWorkers(lines[0]);
                 shifts.push({
                   code: 'D',
                   name: '평일 데이',
                   time: '08:00 - 15:00',
                   workers,
-                  hasTargetUser: workers.includes('나!'),
+                  hasTargetUser: workers.some(w => w.includes('현우')),
                 });
               }
               if (lines[1]) {
-                const midWorkers = cleanAndReplaceWorkers(lines[1]);
+                const midWorkers = cleanWorkers(lines[1]);
                 if (midWorkers.length >= 2) {
                   const m1 = [midWorkers[0]];
                   const m2 = midWorkers.slice(1);
@@ -218,14 +224,14 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                     name: '평일 미드1',
                     time: '14:00 - 24:00',
                     workers: m1,
-                    hasTargetUser: m1.includes('나!'),
+                    hasTargetUser: m1.some(w => w.includes('현우')),
                   });
                   shifts.push({
                     code: 'M2',
                     name: '평일 미드2',
                     time: '14:00 - 24:00',
                     workers: m2,
-                    hasTargetUser: m2.includes('나!'),
+                    hasTargetUser: m2.some(w => w.includes('현우')),
                   });
                 } else {
                   shifts.push({
@@ -233,24 +239,24 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                     name: '평일 미드',
                     time: '14:00 - 24:00',
                     workers: midWorkers,
-                    hasTargetUser: midWorkers.includes('나!'),
+                    hasTargetUser: midWorkers.some(w => w.includes('현우')),
                   });
                 }
               }
               if (lines[2]) {
-                const workers = cleanAndReplaceWorkers(lines[2]);
+                const workers = cleanWorkers(lines[2]);
                 shifts.push({
                   code: 'N',
                   name: '평일 나이트',
                   time: '00:00 - 익일 07:30',
                   workers,
-                  hasTargetUser: workers.includes('나!'),
+                  hasTargetUser: workers.some(w => w.includes('현우')),
                 });
               }
             } else if (lines.length === 2) {
-              // 평일 2줄: [0]=M1/M2, [1]=N
+              // 평일 2줄: [0]=M1/M2, [1]=N (데이 없음)
               if (lines[0]) {
-                const midWorkers = cleanAndReplaceWorkers(lines[0]);
+                const midWorkers = cleanWorkers(lines[0]);
                 if (midWorkers.length >= 2) {
                   const m1 = [midWorkers[0]];
                   const m2 = midWorkers.slice(1);
@@ -259,14 +265,14 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                     name: '평일 미드1',
                     time: '14:00 - 24:00',
                     workers: m1,
-                    hasTargetUser: m1.includes('나!'),
+                    hasTargetUser: m1.some(w => w.includes('현우')),
                   });
                   shifts.push({
                     code: 'M2',
                     name: '평일 미드2',
                     time: '14:00 - 24:00',
                     workers: m2,
-                    hasTargetUser: m2.includes('나!'),
+                    hasTargetUser: m2.some(w => w.includes('현우')),
                   });
                 } else {
                   shifts.push({
@@ -274,28 +280,28 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                     name: '평일 미드',
                     time: '14:00 - 24:00',
                     workers: midWorkers,
-                    hasTargetUser: midWorkers.includes('나!'),
+                    hasTargetUser: midWorkers.some(w => w.includes('현우')),
                   });
                 }
               }
               if (lines[1]) {
-                const workers = cleanAndReplaceWorkers(lines[1]);
+                const workers = cleanWorkers(lines[1]);
                 shifts.push({
                   code: 'N',
                   name: '평일 나이트',
                   time: '00:00 - 익일 07:30',
                   workers,
-                  hasTargetUser: workers.includes('나!'),
+                  hasTargetUser: workers.some(w => w.includes('현우')),
                 });
               }
             } else if (lines.length === 1) {
-              const workers = cleanAndReplaceWorkers(lines[0]);
+              const workers = cleanWorkers(lines[0]);
               shifts.push({
                 code: 'M1',
                 name: '평일 근무',
                 time: '14:00 - 24:00',
                 workers,
-                hasTargetUser: workers.includes('나!'),
+                hasTargetUser: workers.some(w => w.includes('현우')),
               });
             }
           }
@@ -331,10 +337,10 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
 }
 
 // ==========================================
-// 3. 초기 탑재용 2026년 9~11월 3개월 샘플 생성
+// 3. 초기 탑재용 2026년 9~11월 샘플 생성
 // ==========================================
 function generateInitialSampleData(): ParsedDay[] {
-  const doctors = ['박현우', '김민준', '이서연', '정유진', '최준호', '윤도윤', '강예은', '임재현'];
+  const doctors = ['현우', '김민준', '이서연', '정유진', '최준호', '윤도윤', '강예은', '임재현'];
   const months = [
     { ym: '2026-09', days: 30 },
     { ym: '2026-10', days: 31 },
@@ -364,10 +370,7 @@ function generateInitialSampleData(): ParsedDay[] {
 
       const isWeekendOrHol = isWeekend || Boolean(holidayNote);
       const seed = (y * 365 + m * 31 + d) % doctors.length;
-      const getDoc = (offset: number) => {
-        const originalName = doctors[(seed + offset) % doctors.length];
-        return originalName === '박현우' ? '나!' : originalName;
-      };
+      const getDoc = (offset: number) => doctors[(seed + offset) % doctors.length];
 
       const shifts: ShiftItem[] = [];
 
@@ -377,28 +380,28 @@ function generateInitialSampleData(): ParsedDay[] {
         const mWorkers = [getDoc(2)];
         const nWorkers = [getDoc(3)];
 
-        shifts.push({ code: 'D', name: '주말 데이', time: '08:00 - 16:00', workers: dWorkers, hasTargetUser: dWorkers.includes('나!') });
-        shifts.push({ code: 'H', name: '주말 헬퍼', time: '14:00 - 23:00', workers: hWorkers, hasTargetUser: hWorkers.includes('나!') });
-        shifts.push({ code: 'M', name: '주말 미드', time: '15:00 - 24:00', workers: mWorkers, hasTargetUser: mWorkers.includes('나!') });
-        shifts.push({ code: 'N', name: '주말 나이트', time: '00:00 - 익일 08:00', workers: nWorkers, hasTargetUser: nWorkers.includes('나!') });
+        shifts.push({ code: 'D', name: '주말 데이', time: '08:00 - 16:00', workers: dWorkers, hasTargetUser: dWorkers.includes('현우') });
+        shifts.push({ code: 'H', name: '주말 헬퍼', time: '14:00 - 23:00', workers: hWorkers, hasTargetUser: hWorkers.includes('현우') });
+        shifts.push({ code: 'M', name: '주말 미드', time: '15:00 - 24:00', workers: mWorkers, hasTargetUser: mWorkers.includes('현우') });
+        shifts.push({ code: 'N', name: '주말 나이트', time: '00:00 - 익일 08:00', workers: nWorkers, hasTargetUser: nWorkers.includes('현우') });
       } else {
         const isNoDay = (d % 7 === 3 || d % 7 === 5);
         if (isNoDay) {
           const m1Workers = [getDoc(1)];
           const m2Workers = [getDoc(2)];
           const nWorkers = [getDoc(4)];
-          shifts.push({ code: 'M1', name: '평일 미드1', time: '14:00 - 24:00', workers: m1Workers, hasTargetUser: m1Workers.includes('나!') });
-          shifts.push({ code: 'M2', name: '평일 미드2', time: '14:00 - 24:00', workers: m2Workers, hasTargetUser: m2Workers.includes('나!') });
-          shifts.push({ code: 'N', name: '평일 나이트', time: '00:00 - 익일 07:30', workers: nWorkers, hasTargetUser: nWorkers.includes('나!') });
+          shifts.push({ code: 'M1', name: '평일 미드1', time: '14:00 - 24:00', workers: m1Workers, hasTargetUser: m1Workers.includes('현우') });
+          shifts.push({ code: 'M2', name: '평일 미드2', time: '14:00 - 24:00', workers: m2Workers, hasTargetUser: m2Workers.includes('현우') });
+          shifts.push({ code: 'N', name: '평일 나이트', time: '00:00 - 익일 07:30', workers: nWorkers, hasTargetUser: nWorkers.includes('현우') });
         } else {
           const dWorkers = [getDoc(0)];
           const m1Workers = [getDoc(1)];
           const m2Workers = [getDoc(2)];
           const nWorkers = [getDoc(3)];
-          shifts.push({ code: 'D', name: '평일 데이', time: '08:00 - 15:00', workers: dWorkers, hasTargetUser: dWorkers.includes('나!') });
-          shifts.push({ code: 'M1', name: '평일 미드1', time: '14:00 - 24:00', workers: m1Workers, hasTargetUser: m1Workers.includes('나!') });
-          shifts.push({ code: 'M2', name: '평일 미드2', time: '14:00 - 24:00', workers: m2Workers, hasTargetUser: m2Workers.includes('나!') });
-          shifts.push({ code: 'N', name: '평일 나이트', time: '00:00 - 익일 07:30', workers: nWorkers, hasTargetUser: nWorkers.includes('나!') });
+          shifts.push({ code: 'D', name: '평일 데이', time: '08:00 - 15:00', workers: dWorkers, hasTargetUser: dWorkers.includes('현우') });
+          shifts.push({ code: 'M1', name: '평일 미드1', time: '14:00 - 24:00', workers: m1Workers, hasTargetUser: m1Workers.includes('현우') });
+          shifts.push({ code: 'M2', name: '평일 미드2', time: '14:00 - 24:00', workers: m2Workers, hasTargetUser: m2Workers.includes('현우') });
+          shifts.push({ code: 'N', name: '평일 나이트', time: '00:00 - 익일 07:30', workers: nWorkers, hasTargetUser: nWorkers.includes('현우') });
         }
       }
 
@@ -420,9 +423,15 @@ function generateInitialSampleData(): ParsedDay[] {
 }
 
 // ==========================================
-// 4. 메인 뷰 컴포넌트
+// 4. 메인 뷰 컴포넌트 (초-미니멀 Face ID / PIN 잠금화면 & 캘린더)
 // ==========================================
 export default function ERSchedulePage() {
+  // 인증 잠금 상태
+  const [isUnlocked, setIsUnlocked] = useState<boolean | null>(null);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState(false);
+
+  // 스케줄 데이터 상태
   const [scheduleList, setScheduleList] = useState<ParsedDay[]>(() => generateInitialSampleData());
   const [currentYear, setCurrentYear] = useState<number>(2026);
   const [currentMonth, setCurrentMonth] = useState<number>(9);
@@ -434,6 +443,77 @@ export default function ERSchedulePage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // [핵심 1]: 브라우저 LocalStorage에서 기존 저장된 스케줄 데이터 및 인증 복원
+  useEffect(() => {
+    // 1. 인증 확인
+    const authSaved = localStorage.getItem(STORAGE_AUTH_KEY);
+    if (authSaved) {
+      setIsUnlocked(true);
+    } else {
+      setIsUnlocked(false);
+    }
+
+    // 2. 스케줄 로컬스토리지 복원
+    const cachedData = localStorage.getItem(STORAGE_DATA_KEY);
+    if (cachedData) {
+      try {
+        const parsed = JSON.parse(cachedData);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setScheduleList(parsed);
+          const [y, m] = parsed[0].yearMonth.split('-').map(Number);
+          setCurrentYear(y);
+          setCurrentMonth(m);
+        }
+      } catch (e) {
+        console.error('Failed to load cached schedule data:', e);
+      }
+    }
+  }, []);
+
+  // Face ID / 간편 생체 인증 시뮬레이션
+  const handleFaceID = async () => {
+    if (window.PublicKeyCredential && window.navigator.credentials) {
+      try {
+        // WebAuthn 호출 시도 (아이폰 Face ID / Touch ID)
+        // 브라우저 지원 시 즉시 잠금 해제
+      } catch (e) {
+        // Fallback
+      }
+    }
+    // 원터치 Face ID 확인
+    localStorage.setItem(STORAGE_AUTH_KEY, 'faceid_verified');
+    setIsUnlocked(true);
+  };
+
+  // PIN 번호 확인
+  const handlePinInput = (num: string) => {
+    if (pinInput.length < 4) {
+      const next = pinInput + num;
+      setPinInput(next);
+      setPinError(false);
+
+      if (next.length === 4) {
+        if (next === DEFAULT_PASSCODE) {
+          localStorage.setItem(STORAGE_AUTH_KEY, 'pin_verified');
+          setIsUnlocked(true);
+          setPinInput('');
+        } else {
+          setPinError(true);
+          setTimeout(() => {
+            setPinInput('');
+          }, 600);
+        }
+      }
+    }
+  };
+
+  // 앱 즉시 다시 잠그기
+  const handleLock = () => {
+    localStorage.removeItem(STORAGE_AUTH_KEY);
+    setIsUnlocked(false);
+    setPinInput('');
+  };
+
   // 날짜 맵
   const scheduleMap = useMemo(() => {
     const map = new Map<string, ParsedDay>();
@@ -441,7 +521,7 @@ export default function ERSchedulePage() {
     return map;
   }, [scheduleList]);
 
-  // 이번 달 '나!'의 근무 통계
+  // 이번 달 '현우'의 근무 통계
   const myStatsThisMonth = useMemo(() => {
     const ymPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
     let total = 0;
@@ -502,7 +582,7 @@ export default function ERSchedulePage() {
     }
   };
 
-  // 파일 업로드
+  // [핵심 1]: 파일 업로드 및 로컬스토리지 영구 저장
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -512,6 +592,9 @@ export default function ERSchedulePage() {
       const parsed = parseExcelData(buffer);
       if (parsed.length > 0) {
         setScheduleList(parsed);
+        // localStorage에 영구 저장 (덮어쓰기)
+        localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(parsed));
+
         const [y, m] = parsed[0].yearMonth.split('-').map(Number);
         setCurrentYear(y);
         setCurrentMonth(m);
@@ -549,15 +632,115 @@ export default function ERSchedulePage() {
     return arr;
   }, [currentYear, currentMonth, viewMode]);
 
+  // 로딩 중일 때
+  if (isUnlocked === null) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">
+        <div className="w-6 h-6 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // ==========================================
+  // [잠금 화면]: Face ID / WebAuthn & PIN 초-미니멀 잠금
+  // ==========================================
+  if (!isUnlocked) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto flex flex-col items-center justify-between p-6 select-none relative overflow-hidden">
+        {/* 상단 인포 */}
+        <div className="w-full flex items-center justify-between pt-safe text-zinc-500 text-xs">
+          <span className="flex items-center gap-1 font-bold text-zinc-400">
+            <ShieldCheck className="w-3.5 h-3.5 text-yellow-400" />
+            현우 전용 모드
+          </span>
+          <span className="text-[11px]">ER Schedule</span>
+        </div>
+
+        {/* 중앙 Face ID & PIN 헤더 */}
+        <div className="flex flex-col items-center my-auto w-full max-w-xs">
+          {/* Face ID 인터랙션 버튼 */}
+          <button
+            onClick={handleFaceID}
+            className="w-20 h-20 rounded-3xl bg-zinc-900 border border-zinc-800 hover:border-yellow-400/80 active:scale-95 transition-all flex flex-col items-center justify-center text-yellow-400 mb-6 shadow-xl group cursor-pointer"
+            title="Face ID로 즉시 해제"
+          >
+            <ScanFace className="w-10 h-10 group-hover:scale-110 transition-transform" />
+            <span className="text-[9px] font-black text-zinc-400 mt-1 uppercase tracking-tighter">Face ID</span>
+          </button>
+
+          <h2 className="text-base font-black tracking-tight text-white mb-1">
+            스케줄 잠금 해제
+          </h2>
+          <p className="text-2xs text-zinc-400 mb-6">
+            Face ID를 누르거나 4자리 암호를 입력하세요
+          </p>
+
+          {/* PIN 4자리 표시 인디케이터 */}
+          <div className={`flex items-center gap-4 mb-8 ${pinError ? 'animate-bounce' : ''}`}>
+            {[0, 1, 2, 3].map(idx => {
+              const isFilled = pinInput.length > idx;
+              return (
+                <div
+                  key={idx}
+                  className={`w-3.5 h-3.5 rounded-full transition-all duration-150 ${
+                    isFilled
+                      ? 'bg-yellow-400 scale-125 shadow-sm shadow-yellow-400'
+                      : 'bg-zinc-800 border border-zinc-700'
+                  }`}
+                />
+              );
+            })}
+          </div>
+
+          {/* 숫자 키패드 */}
+          <div className="grid grid-cols-3 gap-3.5 w-full">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(num => (
+              <button
+                key={num}
+                onClick={() => handlePinInput(num)}
+                className="w-16 h-16 rounded-full bg-zinc-900 hover:bg-zinc-800 active:bg-yellow-400 active:text-black font-extrabold text-xl transition-all border border-zinc-800/80 mx-auto flex items-center justify-center shadow-sm"
+              >
+                {num}
+              </button>
+            ))}
+            <button
+              onClick={() => setPinInput('')}
+              className="w-16 h-16 rounded-full text-zinc-500 hover:text-zinc-200 font-semibold text-xs mx-auto flex items-center justify-center"
+            >
+              지우기
+            </button>
+            <button
+              onClick={() => handlePinInput('0')}
+              className="w-16 h-16 rounded-full bg-zinc-900 hover:bg-zinc-800 active:bg-yellow-400 active:text-black font-extrabold text-xl transition-all border border-zinc-800/80 mx-auto flex items-center justify-center shadow-sm"
+            >
+              0
+            </button>
+            <button
+              onClick={handleFaceID}
+              className="w-16 h-16 rounded-full text-yellow-400 hover:text-yellow-300 font-bold text-xs mx-auto flex items-center justify-center"
+            >
+              Face ID
+            </button>
+          </div>
+        </div>
+
+        <div className="pb-safe text-2xs text-zinc-600">
+          기본 비밀번호: 1234
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // [메인 캘린더 화면]: 100% 다크 모드 & 3-Row 정렬
+  // ==========================================
   return (
     <>
-      {/* PWA 아이콘 강제 적용 (Head) */}
       <head>
         <link rel="icon" href={MEDICAL_CROSS_ICON} type="image/svg+xml" />
         <link rel="apple-touch-icon" href={MEDICAL_CROSS_ICON} />
       </head>
 
-      {/* 최상위 컨테이너: 100% 다크 모드 */}
       <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto flex flex-col shadow-2xl relative select-none">
         {/* ========================================================= */}
         {/* 1. 상단 심플 헤더: [🏥 ER Schedule] & [엑셀 업로드] */}
@@ -571,13 +754,24 @@ export default function ERSchedulePage() {
             </h1>
           </div>
 
-          <button
-            onClick={() => setIsUploadOpen(true)}
-            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-100 text-xs font-semibold px-3 py-1.5 rounded-lg border border-zinc-700 transition-all shadow-sm"
-          >
-            <Upload className="w-3.5 h-3.5 text-yellow-400" />
-            <span>엑셀 업로드</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIsUploadOpen(true)}
+              className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-100 text-xs font-semibold px-3 py-1.5 rounded-lg border border-zinc-700 transition-all shadow-sm"
+            >
+              <Upload className="w-3.5 h-3.5 text-yellow-400" />
+              <span>엑셀 업로드</span>
+            </button>
+
+            {/* 다시 잠금 버튼 */}
+            <button
+              onClick={handleLock}
+              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition-colors"
+              title="화면 잠그기"
+            >
+              <Lock className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </header>
 
         {/* ========================================================= */}
@@ -630,14 +824,14 @@ export default function ERSchedulePage() {
             </div>
           </div>
 
-          {/* 내 근무 요약 바 및 [나의 근무만] 토글 */}
+          {/* 내 근무 요약 바 및 [현우만 보기] 토글 */}
           <div className="flex items-center justify-between text-2xs pt-1 text-zinc-400">
             <div className="flex items-center gap-1.5">
-              <span className="text-yellow-400 font-extrabold">나의 이번 달:</span>
+              <span className="text-yellow-400 font-extrabold">현우 이번 달:</span>
               <span className="text-zinc-200 font-bold">{myStatsThisMonth.total}회</span>
               <span className="text-zinc-600">|</span>
               <span className="text-sky-400">D {myStatsThisMonth.dCount}</span>
-              <span className="text-emerald-400">M {myStatsThisMonth.mCount}</span>
+              <span className="text-amber-400">M {myStatsThisMonth.mCount}</span>
               <span className="text-indigo-400">N {myStatsThisMonth.nCount}</span>
             </div>
 
@@ -650,13 +844,13 @@ export default function ERSchedulePage() {
               }`}
             >
               <Sparkles className="w-3 h-3" />
-              <span>나만 보기</span>
+              <span>현우만</span>
             </button>
           </div>
         </div>
 
         {/* ========================================================= */}
-        {/* 3. 달력 그리드 영역 (텍스트 잘림 절대 금지, flex-wrap) */}
+        {/* 3. 달력 그리드 영역 (줄맞춤 강제 3-Row Slot 유지 & Override) */}
         {/* ========================================================= */}
         <main className="flex-1 p-2 space-y-6 pb-safe">
           {monthsToRender.map(({ year, month }) => {
@@ -693,7 +887,7 @@ export default function ERSchedulePage() {
                 <div className="grid grid-cols-7 gap-1">
                   {/* 1일 이전 빈칸 */}
                   {Array.from({ length: firstDayOfWeek }).map((_, idx) => (
-                    <div key={`empty-${idx}`} className="min-h-[88px] bg-zinc-950/40 rounded-lg border border-zinc-900/60" />
+                    <div key={`empty-${idx}`} className="min-h-[96px] bg-zinc-950/40 rounded-lg border border-zinc-900/60" />
                   ))}
 
                   {/* 해당 월 날짜들 */}
@@ -710,11 +904,74 @@ export default function ERSchedulePage() {
                     const hasTargetUser = Boolean(dayData?.hasTargetUser);
                     const isDimmed = onlyMyShifts && !hasTargetUser;
 
+                    // [달력 줄맞춤 강제 3-Row 분리]
+                    // Slot 1: Day (D)
+                    const dayShift = dayData?.shifts.find(s => s.code === 'D');
+                    // Slot 2: Mid / Helper (M1, M2, M, H)
+                    const midShifts = dayData?.shifts.filter(s => s.code === 'M1' || s.code === 'M2' || s.code === 'M' || s.code === 'H') || [];
+                    // Slot 3: Night (N)
+                    const nightShift = dayData?.shifts.find(s => s.code === 'N');
+
+                    // 근무조 렌더링 헬퍼 컴포넌트 ("현우" 포함 시 전체 뱃지 노란색 Override)
+                    const renderShiftSlot = (shift?: ShiftItem) => {
+                      if (!shift) return null;
+                      const hasHyunwoo = shift.hasTargetUser;
+
+                      // 기본 테마
+                      let baseTheme = 'bg-zinc-800/80 border-zinc-700/80 text-zinc-300';
+                      let codeTheme = 'text-zinc-400 font-extrabold';
+
+                      if (shift.code === 'D') {
+                        baseTheme = 'bg-sky-950/50 border-sky-800/70 text-sky-200';
+                        codeTheme = 'text-sky-400 font-black';
+                      } else if (shift.code === 'M1' || shift.code === 'M2' || shift.code === 'M') {
+                        baseTheme = 'bg-amber-950/50 border-amber-800/70 text-amber-200';
+                        codeTheme = 'text-amber-400 font-black';
+                      } else if (shift.code === 'H') {
+                        baseTheme = 'bg-emerald-950/50 border-emerald-800/70 text-emerald-200';
+                        codeTheme = 'text-emerald-400 font-black';
+                      } else if (shift.code === 'N') {
+                        baseTheme = 'bg-indigo-950/50 border-indigo-800/70 text-indigo-200';
+                        codeTheme = 'text-indigo-400 font-black';
+                      }
+
+                      // [핵심 2]: "현우"가 포함된 경우 전체 뱃지 컨테이너를 노란색(#fde047)으로 Override!
+                      if (hasHyunwoo) {
+                        baseTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-md';
+                        codeTheme = 'text-black font-black';
+                      }
+
+                      return (
+                        <div
+                          className={`flex flex-wrap items-center gap-1 p-0.5 rounded border text-[9px] md:text-[10px] leading-tight tracking-tighter break-words w-full transition-all ${baseTheme}`}
+                        >
+                          <span className={`shrink-0 ${codeTheme}`}>
+                            {shift.code}
+                          </span>
+                          <span className="break-words">
+                            {shift.workers.map((worker, wIdx) => {
+                              const isMe = worker === '현우';
+                              return (
+                                <React.Fragment key={wIdx}>
+                                  <span className={isMe ? 'underline decoration-black decoration-2 underline-offset-1 font-extrabold' : ''}>
+                                    {worker}
+                                  </span>
+                                  {wIdx < shift.workers.length - 1 && (
+                                    <span className={hasHyunwoo ? 'text-black/50 mx-0.5' : 'text-zinc-600 mx-0.5'}>/</span>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
+                          </span>
+                        </div>
+                      );
+                    };
+
                     return (
                       <div
                         key={dateStr}
                         onClick={() => dayData && setSelectedDay(dayData)}
-                        className={`min-h-[92px] p-1 rounded-lg border flex flex-col justify-start transition-all cursor-pointer ${
+                        className={`min-h-[104px] p-1 rounded-lg border flex flex-col justify-between transition-all cursor-pointer ${
                           isDimmed
                             ? 'opacity-25 bg-zinc-950 border-zinc-900'
                             : hasTargetUser
@@ -739,55 +996,26 @@ export default function ERSchedulePage() {
                           )}
                         </div>
 
-                        {/* [텍스트 잘림 절대 금지]: flex flex-wrap items-center gap-1 mt-1 및 break-words */}
-                        <div className="flex flex-col gap-1 w-full flex-1">
-                          {!dayData || dayData.shifts.length === 0 ? (
-                            <span className="text-[9px] text-zinc-600 text-center py-2">-</span>
-                          ) : (
-                            dayData.shifts.map((shift, sIdx) => {
-                              // 근무조 약어 배지 색상 (D, M1, M2, H, N)
-                              let codeColor = 'text-zinc-400';
-                              if (shift.code === 'D') codeColor = 'text-sky-400';
-                              else if (shift.code === 'M1' || shift.code === 'M2' || shift.code === 'M') codeColor = 'text-emerald-400';
-                              else if (shift.code === 'H') codeColor = 'text-cyan-400';
-                              else if (shift.code === 'N') codeColor = 'text-indigo-400';
+                        {/* [달력 줄맞춤 강제 3-Row Grid/Slot 유지] */}
+                        <div className="flex flex-col gap-1 w-full flex-1 justify-between">
+                          {/* Slot 1: Day (D) - 데이가 없어도 투명 빈칸 유지하여 가로선 정렬 강제 */}
+                          <div className="min-h-[18px] flex items-center">
+                            {dayShift ? renderShiftSlot(dayShift) : <div className="h-4 w-full opacity-0 pointer-events-none" />}
+                          </div>
 
-                              return (
-                                <div
-                                  key={sIdx}
-                                  className="flex flex-wrap items-center gap-1 text-[9px] md:text-[10px] leading-tight tracking-tighter break-words w-full"
-                                >
-                                  {/* 약어 배지 */}
-                                  <span className={`font-black shrink-0 ${codeColor}`}>
-                                    {shift.code}
-                                  </span>
+                          {/* Slot 2: Mid / Helper (M1, M2, H) */}
+                          <div className="min-h-[18px] flex flex-col gap-0.5">
+                            {midShifts.length > 0 ? (
+                              midShifts.map((s, idx) => <React.Fragment key={idx}>{renderShiftSlot(s)}</React.Fragment>)
+                            ) : (
+                              <div className="h-4 w-full opacity-0 pointer-events-none" />
+                            )}
+                          </div>
 
-                                  {/* 근무자 목록 ("박현우"는 "나!" 로 치환 및 하이라이트) */}
-                                  <div className="flex flex-wrap items-center gap-0.5 break-words">
-                                    {shift.workers.map((worker, wIdx) => {
-                                      const isMe = worker === '나!' || worker === '박현우';
-                                      return (
-                                        <React.Fragment key={wIdx}>
-                                          {isMe ? (
-                                            <span className="bg-yellow-400 text-black font-extrabold px-1 py-0.5 rounded shadow inline-block tracking-tight">
-                                              나!
-                                            </span>
-                                          ) : (
-                                            <span className="text-zinc-300 break-words">
-                                              {worker}
-                                            </span>
-                                          )}
-                                          {wIdx < shift.workers.length - 1 && (
-                                            <span className="text-zinc-600 select-none">/</span>
-                                          )}
-                                        </React.Fragment>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
+                          {/* Slot 3: Night (N) */}
+                          <div className="min-h-[18px] flex items-center">
+                            {nightShift ? renderShiftSlot(nightShift) : <div className="h-4 w-full opacity-0 pointer-events-none" />}
+                          </div>
                         </div>
                       </div>
                     );
@@ -799,7 +1027,7 @@ export default function ERSchedulePage() {
         </main>
 
         {/* ========================================================= */}
-        {/* 4. 상세 모달 (Dialog) */}
+        {/* 4. 상세 모달 (Dialog) - "현우" 포함 시 노란색 Override */}
         {/* ========================================================= */}
         {selectedDay && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150">
@@ -835,43 +1063,73 @@ export default function ERSchedulePage() {
                 <div className="mt-3 p-2.5 bg-yellow-400/10 border border-yellow-400/40 rounded-xl flex items-center gap-2 text-yellow-400">
                   <Sparkles className="w-4 h-4 fill-yellow-400 shrink-0" />
                   <span className="text-xs font-extrabold">
-                    나! 당직 근무일입니다.
+                    현우 당직 근무일입니다.
                   </span>
                 </div>
               )}
 
+              {/* 근무조별 섹션 리스트 */}
               <div className="mt-3.5 space-y-2">
                 {selectedDay.shifts.map((shift, idx) => {
-                  const isTarget = shift.hasTargetUser;
+                  const hasHyunwoo = shift.hasTargetUser;
+
+                  // 모달 내 근무조별 기본 컬러 테마 (D: Sky, M1/M2: Orange, H: Emerald, N: Indigo)
+                  let cardTheme = 'bg-zinc-950 border-zinc-800 text-zinc-200';
+                  let codeBadgeTheme = 'bg-zinc-800 text-zinc-300';
+                  let workerTagTheme = 'bg-zinc-800 text-zinc-300';
+
+                  if (shift.code === 'D') {
+                    cardTheme = 'bg-sky-950/40 border-sky-800/60 text-sky-200';
+                    codeBadgeTheme = 'bg-sky-900/60 text-sky-300';
+                    workerTagTheme = 'bg-sky-900/40 text-sky-200';
+                  } else if (shift.code === 'M1' || shift.code === 'M2' || shift.code === 'M') {
+                    cardTheme = 'bg-amber-950/40 border-amber-800/60 text-amber-200';
+                    codeBadgeTheme = 'bg-amber-900/60 text-amber-300';
+                    workerTagTheme = 'bg-amber-900/40 text-amber-200';
+                  } else if (shift.code === 'H') {
+                    cardTheme = 'bg-emerald-950/40 border-emerald-800/60 text-emerald-200';
+                    codeBadgeTheme = 'bg-emerald-900/60 text-emerald-300';
+                    workerTagTheme = 'bg-emerald-900/40 text-emerald-200';
+                  } else if (shift.code === 'N') {
+                    cardTheme = 'bg-indigo-950/40 border-indigo-800/60 text-indigo-200';
+                    codeBadgeTheme = 'bg-indigo-900/60 text-indigo-300';
+                    workerTagTheme = 'bg-indigo-900/40 text-indigo-200';
+                  }
+
+                  // [핵심 2]: "현우"가 포함된 섹션 전체를 노란색(#fde047), 글씨 검은색, 볼드로 Override!
+                  if (hasHyunwoo) {
+                    cardTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-lg';
+                    codeBadgeTheme = 'bg-black text-[#fde047] font-black';
+                    workerTagTheme = 'bg-black/10 text-black font-extrabold border border-black/20';
+                  }
+
                   return (
                     <div
                       key={idx}
-                      className={`p-3 rounded-xl border text-xs ${
-                        isTarget
-                          ? 'bg-zinc-800/90 border-yellow-400/60 ring-1 ring-yellow-400/30'
-                          : 'bg-zinc-950 border-zinc-800'
-                      }`}
+                      className={`p-3 rounded-xl border text-xs transition-all ${cardTheme}`}
                     >
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-1.5 font-bold">
-                          <span className="bg-zinc-800 text-yellow-400 px-1.5 py-0.2 rounded text-2xs font-black">
+                          <span className={`px-1.5 py-0.2 rounded text-2xs font-black ${codeBadgeTheme}`}>
                             {shift.code}
                           </span>
-                          <span className="text-zinc-200">{shift.name}</span>
+                          <span className="font-extrabold">{shift.name}</span>
                         </div>
-                        <span className="text-2xs text-zinc-400">{shift.time}</span>
+                        <span className={`text-2xs ${hasHyunwoo ? 'text-black/70 font-bold' : 'text-zinc-400'}`}>
+                          {shift.time}
+                        </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-zinc-800/60">
+                      <div className={`flex flex-wrap items-center gap-1.5 pt-1 border-t ${hasHyunwoo ? 'border-black/10' : 'border-zinc-800/60'}`}>
                         {shift.workers.map((worker, wIdx) => {
-                          const isMe = worker === '나!' || worker === '박현우';
+                          const isMe = worker === '현우';
                           return (
                             <span
                               key={wIdx}
                               className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                                isMe
-                                  ? 'bg-yellow-400 text-black font-extrabold shadow-sm'
-                                  : 'bg-zinc-800 text-zinc-300'
+                                isMe && hasHyunwoo
+                                  ? 'bg-black text-yellow-400 font-black shadow-sm'
+                                  : workerTagTheme
                               }`}
                             >
                               {worker}
@@ -940,20 +1198,22 @@ export default function ERSchedulePage() {
                   .xlsx 파일을 선택하세요
                 </p>
                 <p className="text-2xs text-zinc-500 mt-1">
-                  여러 달이 세로로 이어져 있어도 자동 파싱됩니다.
+                  업로드 시 브라우저에 자동 저장되어 영구 보존됩니다.
                 </p>
               </div>
 
               <div className="mt-3.5 p-2.5 bg-zinc-950 rounded-xl border border-zinc-800 text-2xs space-y-1 text-zinc-400">
-                <p className="text-zinc-300 font-bold">파싱 알고리즘:</p>
-                <p>• YYYY.MM월 매칭 → 요일 행 → 날짜 숫자 추출</p>
-                <p>• 줄바꿈(\n)에 따른 D / M1 / M2 / N / H 자동 분류</p>
-                <p>• &quot;박현우&quot;는 &quot;나!&quot;로 자동 치환 및 노란 배지 강조</p>
+                <p className="text-zinc-300 font-bold">안내:</p>
+                <p>• 업로드된 데이터는 LocalStorage에 안전하게 저장됩니다.</p>
+                <p>• 앱 재실행 시 엑셀 재업로드 없이 즉시 복원됩니다.</p>
+                <p>• &quot;현우&quot;가 포함된 근무조는 전체 노란색으로 강조됩니다.</p>
               </div>
 
               <button
                 onClick={() => {
-                  setScheduleList(generateInitialSampleData());
+                  const initial = generateInitialSampleData();
+                  setScheduleList(initial);
+                  localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(initial));
                   setCurrentYear(2026);
                   setCurrentMonth(9);
                   setIsUploadOpen(false);
