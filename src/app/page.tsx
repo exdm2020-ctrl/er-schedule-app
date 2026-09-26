@@ -89,8 +89,78 @@ function normalizeDateKey(year: number | string, month: number | string, day: nu
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
+// [날짜 추출 헬퍼]: new Date() 타임존 시차 없이 순수 문자열/정수 기반 추출
+interface ExtractedDate {
+  year: number;
+  month: number;
+  day: number;
+  holidayNote: string | null;
+}
+
+function extractDateInfo(
+  rawVal: any,
+  defaultYear: number,
+  defaultMonth: number
+): ExtractedDate | null {
+  if (rawVal === null || rawVal === undefined) return null;
+  const str = String(rawVal).trim();
+  if (!str) return null;
+
+  // 공휴일 메모 (예: "1(신정)", "2026-09-01(신정)", "25(추석)")
+  const memoMatch = str.match(/\((.*?)\)/);
+  const holidayNote = memoMatch ? memoMatch[1].trim() : null;
+  // 괄호 메모 제외한 순수 날짜 문자열
+  const pureStr = str.replace(/\(.*?\)/g, '').trim();
+
+  // 1) 전체 날짜 포맷 (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD, YYYY년 M월 D일)
+  const fullYmdMatch = pureStr.match(/(\d{4})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
+  if (fullYmdMatch) {
+    const y = parseInt(fullYmdMatch[1], 10);
+    const m = parseInt(fullYmdMatch[2], 10);
+    const d = parseInt(fullYmdMatch[3], 10);
+    if (y >= 2020 && y <= 2035 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return { year: y, month: m, day: d, holidayNote };
+    }
+  }
+
+  // 2) 엑셀 날짜 일련번호 (40000 ~ 60000) 순수 UTC 일수 산술 변환
+  const numVal = typeof rawVal === 'number' ? rawVal : parseFloat(pureStr);
+  if (!isNaN(numVal) && numVal >= 40000 && numVal <= 60000 && /^\d{5}(\.\d+)?$/.test(pureStr)) {
+    const serialDays = Math.floor(numVal);
+    const epochUtc = (serialDays - 25569) * 86400 * 1000;
+    const utcDate = new Date(epochUtc);
+    const y = utcDate.getUTCFullYear();
+    const m = utcDate.getUTCMonth() + 1;
+    const d = utcDate.getUTCDate();
+    if (y >= 2020 && y <= 2035 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return { year: y, month: m, day: d, holidayNote };
+    }
+  }
+
+  // 3) "M/D" 또는 "M.D" (예: "9/1", "9.1", "9/22", "10/1")
+  const mdMatch = pureStr.match(/^(\d{1,2})[\/.](\d{1,2})일?$/);
+  if (mdMatch) {
+    const m = parseInt(mdMatch[1], 10);
+    const d = parseInt(mdMatch[2], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return { year: defaultYear, month: m, day: d, holidayNote };
+    }
+  }
+
+  // 4) 단순 일자 (예: "1", "01", "1일", "22", "23일", "31")
+  const dMatch = pureStr.match(/^(\d{1,2})\s*일?$/);
+  if (dMatch) {
+    const d = parseInt(dMatch[1], 10);
+    if (d >= 1 && d <= 31) {
+      return { year: defaultYear, month: defaultMonth, day: d, holidayNote };
+    }
+  }
+
+  return null;
+}
+
 // ==========================================
-// 2. 엑셀 파싱 핵심 알고리즘 (모든 시트 순회 & 매달 1일 누락 방지 & 1Y 완벽 지원)
+// 2. 엑셀 파싱 핵심 알고리즘 (모든 시트 순회 & 1일/22일/23일 누락 방지 & 동적 행 매칭)
 // ==========================================
 function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
   const workbook = XLSX.read(fileBuffer, { type: 'array', cellDates: false });
@@ -99,7 +169,18 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
   const parsedData: ParsedDay[] = [];
   const processedDateKeys = new Set<string>();
 
-  // [버그 2 해결]: 엑셀 파일 내의 모든 시트를 순회하여 1년 12개월 데이터를 누락 없이 파싱
+  // 근무자 텍스트 정리 함수 (박현우 -> 현우, 슬래시/쉼표/공백 분리)
+  const cleanWorkers = (lineStr: string) => {
+    if (!lineStr) return [];
+    const stripped = lineStr.replace(/^(D|DAY|M|MID|M1|M2|H|HELPER|N|NIGHT|데이|미드|헬퍼|나이트)\s*[:\-\s]\s*/i, '');
+    return stripped
+      .split(/[\/,\s+&|]+/)
+      .map(w => w.trim())
+      .filter(Boolean)
+      .map(w => (w === '박현우' ? '현우' : w));
+  };
+
+  // 엑셀 파일 내의 모든 시트를 순회하여 1년 12개월 데이터를 누락 없이 파싱
   workbook.SheetNames.forEach(sheetName => {
     const worksheet = workbook.Sheets[sheetName];
     if (!worksheet) return;
@@ -110,18 +191,18 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
       defval: '',
     });
 
-    let currentYearMonth: string | null = null;
-    let fallbackYear = 2026;
+    let currentYear = 2026;
+    let currentMonth = 9;
 
     // 시트 이름에서 연/월 유추 (예: "2026.09", "2026-9", "9월")
     const sheetYmMatch = sheetName.match(/(\d{4})[.\-년\s]+(\d{1,2})/);
     if (sheetYmMatch) {
-      fallbackYear = parseInt(sheetYmMatch[1], 10);
-      currentYearMonth = `${fallbackYear}-${String(parseInt(sheetYmMatch[2], 10)).padStart(2, '0')}`;
+      currentYear = parseInt(sheetYmMatch[1], 10);
+      currentMonth = parseInt(sheetYmMatch[2], 10);
     } else {
       const sheetOnlyMonth = sheetName.match(/(\d{1,2})월/);
       if (sheetOnlyMonth) {
-        currentYearMonth = `${fallbackYear}-${String(parseInt(sheetOnlyMonth[1], 10)).padStart(2, '0')}`;
+        currentMonth = parseInt(sheetOnlyMonth[1], 10);
       }
     }
 
@@ -131,202 +212,196 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
       // [월 식별]: 셀에서 다양한 형태의 월 표기(2026.9월, 2026년 9월, 2026-09 등) 감지
       for (let c = 0; c < row.length; c++) {
         const cellStr = String(row[c] || '').trim();
-        // 1) 연도와 월이 함께 있는 경우 (예: "2026.09월", "2026년 9월", "2026. 9")
+        // 1) 연도와 월이 함께 있는 경우
         const fullMatch = cellStr.match(/(\d{4})[.\-년\s]+(\d{1,2})월?/);
         if (fullMatch) {
-          fallbackYear = parseInt(fullMatch[1], 10);
-          const m = String(parseInt(fullMatch[2], 10)).padStart(2, '0');
-          currentYearMonth = `${fallbackYear}-${m}`;
+          currentYear = parseInt(fullMatch[1], 10);
+          currentMonth = parseInt(fullMatch[2], 10);
           break;
         }
         // 2) 단독 "M월"인 경우
         const monthOnlyMatch = cellStr.match(/^(\d{1,2})월$/);
         if (monthOnlyMatch) {
-          const m = String(parseInt(monthOnlyMatch[1], 10)).padStart(2, '0');
-          currentYearMonth = `${fallbackYear}-${m}`;
+          currentMonth = parseInt(monthOnlyMatch[1], 10);
           break;
         }
       }
 
-      if (!currentYearMonth) continue;
-
-      // [요일 식별]: row에 "일", "월" 등이 나타나면 다음 행부터 날짜 및 근무자 행 탐색
+      // [요일 식별]: row에 "일", "월" 등이 나타나면 해당 행을 요일 헤더로 인식
       const rowStrArr = row.map(cell => String(cell || '').trim());
       const hasDaysOfWeek = rowStrArr.includes('일') && rowStrArr.includes('월');
 
       if (hasDaysOfWeek) {
+        // [열 인덱스 동적 감지]: '일', '월', '화', '수', '목', '금', '토'가 위치한 컬럼 번호들 추출
+        const dayKeywords = ['일', '월', '화', '수', '목', '금', '토'];
+        const detectedCols: number[] = [];
+        for (let c = 0; c < row.length; c++) {
+          const txt = String(row[c] || '').trim();
+          if (dayKeywords.some(dk => txt === dk || txt.startsWith(dk))) {
+            detectedCols.push(c);
+          }
+        }
+        const targetCols = detectedCols.length >= 7 ? detectedCols.slice(0, 7) : [0, 1, 2, 3, 4, 5, 6];
+
         let nextR = r + 1;
         let hasSeenDayOneInCurrentBlock = false;
 
+        // [동적 행(Row) 탐색]: 날짜 행을 찾고, 그 아래 첫 번째 유효 근무자 행을 찾아 1:1 매칭
+        // 빈 행이나 병합 셀이 끼어 있어도 절대 인덱스가 어긋나지 않아 22일, 23일 등이 누락되지 않음!
         while (nextR < rawRows.length) {
-          const dateRow = rawRows[nextR] || [];
-          const shiftRow = rawRows[nextR + 1] || [];
+          const candidateRow = rawRows[nextR] || [];
 
-          // 새로운 월 헤더가 나오면 현재 월 블록 파싱 종료 (단, "2026-09-01"처럼 일자가 포함된 날짜 셀은 절대 월 헤더가 아님!)
-          const hasNextMonthHeader = dateRow.some(cell => {
+          // 새로운 월 헤더(예: "2026년 10월", "10월")가 나타나면 현재 월 블록 종료 (단, 2026-09-01 같은 날짜 셀 제외)
+          const isNextMonthTitle = candidateRow.some(cell => {
             const cs = String(cell || '').trim();
             if (!cs) return false;
-            // 1) 2026-09-01, 2026.09.01 등 일자까지 포함된 전체 날짜는 날짜 셀이므로 월 헤더가 아님
             if (cs.match(/\d{4}[.\-\/년\s]+\d{1,2}[.\-\/월\s]+\d{1,2}/)) return false;
-            // 2) 순수 월 제목 행 (예: "2026.10월", "2026년 10월", "2026-10", "10월" 등 일자 없이 끝나는 경우)
-            const isMonthTitle = cs.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || cs.match(/^(\d{1,2})월$/);
-            return Boolean(isMonthTitle);
+            return Boolean(cs.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || cs.match(/^(\d{1,2})월$/));
           });
-          if (hasNextMonthHeader) break;
+          if (isNextMonthTitle) break;
 
-          const isAnotherDayOfWeekRow = dateRow.some(c => String(c).trim() === '일') && dateRow.some(c => String(c).trim() === '월');
-          if (isAnotherDayOfWeekRow) {
+          // 또 다른 요일 행이 나타나면 건너뜀
+          const isAnotherDayOfWeek = candidateRow.some(c => String(c).trim() === '일') && candidateRow.some(c => String(c).trim() === '월');
+          if (isAnotherDayOfWeek) {
             nextR++;
             continue;
           }
 
-          let foundValidDateInThisRow = false;
+          // 현재 행(candidateRow)에서 유효한 날짜가 있는지 검사
+          const validDatesInRow: { col: number; dateInfo: ExtractedDate }[] = [];
+          for (const col of targetCols) {
+            const cellVal = candidateRow[col];
+            const info = extractDateInfo(cellVal, currentYear, currentMonth);
+            if (info) {
+              validDatesInRow.push({ col, dateInfo: info });
+            }
+          }
 
-          for (let col = 0; col < 7; col++) {
-            const dateCellVal = String(dateRow[col] || '').trim();
-            if (!dateCellVal) continue;
-
-            // [매달 1일 버그 완벽 해결]: "2026-09-01", "2026-10-01", "2026.09.01", "9/1", "1일", "1(화)", "01", "1" 등 모든 패턴 지원
-            let dayNum: number | null = null;
-            let cellYear = fallbackYear;
-            let cellMonth = 9;
-
-            if (currentYearMonth) {
-              const [y, m] = currentYearMonth.split('-').map(Number);
-              cellYear = y || fallbackYear;
-              cellMonth = m || 1;
+          // [날짜 행 발견]: 유효 날짜가 1개 이상 들어있는 행
+          if (validDatesInRow.length > 0) {
+            // 그 아래 행들 중 근무자 데이터가 적혀 있는 첫 번째 비어있지 않은 행(shiftRow)을 동적으로 탐색!
+            let shiftRowIndex = nextR + 1;
+            while (shiftRowIndex < rawRows.length) {
+              const potentialShiftRow = rawRows[shiftRowIndex] || [];
+              // 만약 이 행이 새로운 날짜 행이거나 월 헤더면 근무자 행 탐색 중단
+              const hasDates = targetCols.some(c => extractDateInfo(potentialShiftRow[c], currentYear, currentMonth));
+              if (hasDates) {
+                break;
+              }
+              const isMonthHeader = potentialShiftRow.some(c => {
+                const s = String(c || '').trim();
+                return Boolean(s.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || s.match(/^(\d{1,2})월$/));
+              });
+              if (isMonthHeader) {
+                break;
+              }
+              // 근무자 내용이 들어있는 행인지 확인
+              const hasShiftContent = targetCols.some(c => String(potentialShiftRow[c] || '').trim().length > 0);
+              if (hasShiftContent) {
+                break; // 찾았다! 이 행이 shiftRow!
+              }
+              shiftRowIndex++;
             }
 
-            // [핵심 1]: 매달 1일이 "2026-09-01", "2026-10-01" 등 전체 날짜로 표기된 경우 최우선 추출!
-            const fullYmdMatch = dateCellVal.match(/(\d{4})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
-            if (fullYmdMatch) {
-              cellYear = parseInt(fullYmdMatch[1], 10);
-              cellMonth = parseInt(fullYmdMatch[2], 10);
-              dayNum = parseInt(fullYmdMatch[3], 10);
-              currentYearMonth = `${cellYear}-${String(cellMonth).padStart(2, '0')}`;
-            } else if (/^\d{5}$/.test(dateCellVal)) {
-              // 엑셀 날짜 일련번호(Serial Date) 처리 (예: 46266 -> 2026-09-01)
-              const serial = parseInt(dateCellVal, 10);
-              if (serial >= 40000 && serial <= 60000) {
-                const dObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
-                cellYear = dObj.getUTCFullYear();
-                cellMonth = dObj.getUTCMonth() + 1;
-                dayNum = dObj.getUTCDate();
-                currentYearMonth = `${cellYear}-${String(cellMonth).padStart(2, '0')}`;
+            const shiftRow = (shiftRowIndex < rawRows.length) ? (rawRows[shiftRowIndex] || []) : [];
+
+            // 이제 발견된 날짜들과 shiftRow의 해당 열 데이터를 1:1 매칭
+            for (const { col, dateInfo } of validDatesInRow) {
+              const { year: cellYear, month: cellMonth, day: dayNum, holidayNote } = dateInfo;
+
+              // 1주차 전월 말일 방어: 1일을 아직 보지 못했는데 20일 이상인 날짜(전월 30, 31일 등)는 건너뜀
+              if (dayNum === 1) {
+                hasSeenDayOneInCurrentBlock = true;
+              } else if (!hasSeenDayOneInCurrentBlock && dayNum >= 20 && cellMonth === currentMonth) {
+                continue;
               }
-            } else {
-              // 2) "9/1", "9.1", "9월 1일" 형태
-              const mdMatch = dateCellVal.match(/^(\d{1,2})[\/.](\d{1,2})/);
-              if (mdMatch) {
-                cellMonth = parseInt(mdMatch[1], 10);
-                dayNum = parseInt(mdMatch[2], 10);
-              } else {
-                // 3) "1일", "1(화)", "1", "01" 등 단순 숫자/일자 형태
-                const dMatch = dateCellVal.match(/^(\d{1,2})\s*(일|\(|$)/);
-                if (dMatch) {
-                  dayNum = parseInt(dMatch[1], 10);
-                } else {
-                  const anyNum = dateCellVal.match(/^(\d{1,2})/);
-                  if (anyNum) {
-                    dayNum = parseInt(anyNum[1], 10);
-                  } else {
-                    const fallbackNum = dateCellVal.match(/\d+/);
-                    if (fallbackNum) dayNum = parseInt(fallbackNum[0], 10);
+
+              // 무조건 normalizeDateKey를 사용하여 완벽한 YYYY-MM-DD(예: 2026-09-01)로 포맷 통일
+              const dateStr = normalizeDateKey(cellYear, cellMonth, dayNum);
+              const yearMonth = `${cellYear}-${String(cellMonth).padStart(2, '0')}`;
+
+              // 요일 계산
+              const dateObj = new Date(cellYear, cellMonth - 1, dayNum);
+              const dayOfWeek = dateObj.getDay();
+              const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+              // [근무자 줄바꿈(\n) 분리 규칙 적용]
+              const shiftCellVal = String(shiftRow[col] || '').trim();
+              const lines = shiftCellVal
+                .split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(Boolean)
+                .filter(l => l.replace(/[\s\-_=]/g, '').length > 0);
+
+              const shifts: ShiftItem[] = [];
+
+              // [핵심 요구사항]: 오직 셀 내부의 '줄 바꿈(\n)' 갯수(lines.length) 기준으로 근무조 배정!
+              if (lines.length >= 3) {
+                // 3줄: [0]=D, [1]=M, [2]=N
+                if (lines[0]) {
+                  const workers = cleanWorkers(lines[0]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: 'D',
+                      name: '데이',
+                      time: '08:00 - 15:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
                   }
                 }
-              }
-            }
-
-            if (dayNum === null || isNaN(dayNum) || dayNum < 1 || dayNum > 31) continue;
-
-            // 1일 플래그 기록 및 전월 말일 방어
-            if (dayNum === 1) {
-              hasSeenDayOneInCurrentBlock = true;
-            } else if (!hasSeenDayOneInCurrentBlock && dayNum >= 20 && !fullYmdMatch) {
-              // 1주차에서 1일 이전 요일에 지난달 말일(25~31)이 섞여 있는 경우 방어 (전체 날짜로 표기된 경우는 제외)
-              continue;
-            }
-
-            foundValidDateInThisRow = true;
-
-            // 공휴일 메모 (예: "1(신정)", "2026-09-01(신정)", "25(추석)")
-            const memoMatch = dateCellVal.match(/\((.*?)\)/);
-            const holidayNote = memoMatch ? memoMatch[1].trim() : null;
-
-            // [버그 완벽 해결]: 무조건 normalizeDateKey를 사용하여 완벽한 YYYY-MM-DD(예: 2026-09-01)로 포맷 통일
-            const dateStr = normalizeDateKey(cellYear, cellMonth, dayNum);
-
-            // 로컬 날짜 객체로 요일 계산
-            const dateObj = new Date(cellYear, cellMonth - 1, dayNum);
-            const dayOfWeek = dateObj.getDay();
-            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            const isWeekendOrHol = isWeekend || Boolean(holidayNote);
-
-            // [근무자 줄바꿈(\n) 분리 규칙 적용]
-            const shiftCellVal = String(shiftRow[col] || '').trim();
-            // 빈 줄("")이나 공백만 있는 줄 완벽 필터링
-            const lines = shiftCellVal
-              .split(/\r?\n/)
-              .map(l => l.trim())
-              .filter(Boolean)
-              .filter(l => l.replace(/[\s\-_=]/g, '').length > 0);
-
-            const shifts: ShiftItem[] = [];
-
-            // "현우" 이름 정리 함수 (박현우 -> 현우) 및 다수 근무자 분리
-            const cleanWorkers = (lineStr: string) => {
-              if (!lineStr) return [];
-              const stripped = lineStr.replace(/^(D|DAY|M|MID|M1|M2|H|HELPER|N|NIGHT|데이|미드|헬퍼|나이트)\s*[:\-\s]\s*/i, '');
-              return stripped
-                .split(/[\/,\s+&|]+/)
-                .map(w => w.trim())
-                .filter(Boolean)
-                .map(w => (w === '박현우' ? '현우' : w));
-            };
-
-            // [핵심 해결 2]: 평일/공휴일 구분 없이, 오직 셀 내부의 '줄 바꿈(\n)' 갯수(lines.length) 기준으로 근무조 배정!
-            if (lines.length >= 3) {
-              // 유효 데이터가 3줄 이상인 경우: [0]을 D, [1]을 M, [2]를 N에 배정
-              if (lines[0]) {
-                const workers = cleanWorkers(lines[0]);
-                if (workers.length > 0) {
-                  shifts.push({
-                    code: 'D',
-                    name: '데이',
-                    time: '08:00 - 15:00',
-                    workers,
-                    hasTargetUser: workers.some(w => w.includes('현우')),
-                  });
+                if (lines[1]) {
+                  const workers = cleanWorkers(lines[1]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: 'M',
+                      name: '미드',
+                      time: '14:00 - 24:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
                 }
-              }
-              if (lines[1]) {
-                const workers = cleanWorkers(lines[1]);
-                if (workers.length > 0) {
-                  shifts.push({
-                    code: 'M',
-                    name: '미드',
-                    time: '14:00 - 24:00',
-                    workers,
-                    hasTargetUser: workers.some(w => w.includes('현우')),
-                  });
+                if (lines[2]) {
+                  const workers = cleanWorkers(lines[2]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: 'N',
+                      name: '나이트',
+                      time: '00:00 - 익일 08:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
                 }
-              }
-              if (lines[2]) {
-                const workers = cleanWorkers(lines[2]);
-                if (workers.length > 0) {
-                  shifts.push({
-                    code: 'N',
-                    name: '나이트',
-                    time: '00:00 - 익일 08:00',
-                    workers,
-                    hasTargetUser: workers.some(w => w.includes('현우')),
-                  });
+              } else if (lines.length === 2) {
+                // 유효 데이터가 2줄인 경우 (평일/공휴일 무관): D는 없음(투명 빈칸)! [0]은 M, [1]은 N에 배정
+                if (lines[0]) {
+                  const workers = cleanWorkers(lines[0]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: 'M',
+                      name: '미드',
+                      time: '14:00 - 24:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
                 }
-              }
-            } else if (lines.length === 2) {
-              // [핵심]: 유효 데이터가 2줄인 경우 (평일/공휴일 무관):
-              // D 근무는 없는 날입니다! [0]을 M 위치에, [1]을 N 위치에 배정하고 D는 무조건 투명 빈칸으로 둡니다.
-              if (lines[0]) {
+                if (lines[1]) {
+                  const workers = cleanWorkers(lines[1]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: 'N',
+                      name: '나이트',
+                      time: '00:00 - 익일 08:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
+                }
+              } else if (lines.length === 1) {
+                // 1줄: M 위치에 배정
                 const workers = cleanWorkers(lines[0]);
                 if (workers.length > 0) {
                   shifts.push({
@@ -338,52 +413,28 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                   });
                 }
               }
-              if (lines[1]) {
-                const workers = cleanWorkers(lines[1]);
-                if (workers.length > 0) {
-                  shifts.push({
-                    code: 'N',
-                    name: '나이트',
-                    time: '00:00 - 익일 08:00',
-                    workers,
-                    hasTargetUser: workers.some(w => w.includes('현우')),
-                  });
-                }
-              }
-            } else if (lines.length === 1) {
-              // 유효 데이터가 1줄인 경우: M 위치에 배정
-              const workers = cleanWorkers(lines[0]);
-              if (workers.length > 0) {
-                shifts.push({
-                  code: 'M',
-                  name: '미드',
-                  time: '14:00 - 24:00',
-                  workers,
-                  hasTargetUser: workers.some(w => w.includes('현우')),
+
+              if (!processedDateKeys.has(dateStr)) {
+                processedDateKeys.add(dateStr);
+                parsedData.push({
+                  date: dateStr,
+                  yearMonth,
+                  dayNum,
+                  dayOfWeek,
+                  isWeekend,
+                  holidayNote,
+                  shifts,
+                  hasTargetUser: shifts.some(s => s.hasTargetUser),
+                  rawText: shiftCellVal,
                 });
               }
             }
 
-            if (!processedDateKeys.has(dateStr)) {
-              processedDateKeys.add(dateStr);
-              parsedData.push({
-                date: dateStr,
-                yearMonth: currentYearMonth,
-                dayNum,
-                dayOfWeek,
-                isWeekend,
-                holidayNote,
-                shifts,
-                hasTargetUser: shifts.some(s => s.hasTargetUser),
-                rawText: shiftCellVal,
-              });
-            }
-          }
-
-          if (!foundValidDateInThisRow) {
-            nextR++;
+            // 다음 탐색 행은 근무자 행 다음으로 이동 (빈 행이 있더라도 유연하게 스킵)
+            nextR = Math.max(nextR + 1, shiftRowIndex + 1);
           } else {
-            nextR += 2;
+            // 날짜가 없는 빈 행이나 비고 행은 1행씩 전진
+            nextR++;
           }
         }
 
