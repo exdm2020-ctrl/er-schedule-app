@@ -219,7 +219,7 @@ function extractDateInfo(
 }
 
 // ==========================================
-// 2. 엑셀 파싱 핵심 알고리즘 (모든 시트 순회 & 1일/22일/23일 누락 방지 & 동적 행 매칭)
+// 2. 엑셀 파싱 핵심 알고리즘 (모든 시트 순회 & 1일 누락 방지 & 10월 이후 전월 파싱 & M1/M2 분리)
 // ==========================================
 function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
   const workbook = XLSX.read(fileBuffer, { type: 'array', cellDates: false });
@@ -253,8 +253,8 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
     let currentYear = 2026;
     let currentMonth = 9;
 
-    // 시트 이름에서 연/월 유추 (예: "2026.09", "2026-9", "9월")
-    const sheetYmMatch = sheetName.match(/(\d{4})[.\-년\s]+(\d{1,2})/);
+    // 시트 이름에서 연/월 유추 (예: "2026.09", "2026-9", "9월", "10월")
+    const sheetYmMatch = sheetName.match(/(\d{4})[.\-년\s/]+(\d{1,2})/);
     if (sheetYmMatch) {
       currentYear = parseInt(sheetYmMatch[1], 10);
       currentMonth = parseInt(sheetYmMatch[2], 10);
@@ -268,18 +268,23 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
     for (let r = 0; r < rawRows.length; r++) {
       const row = rawRows[r] || [];
 
-      // [월 식별]: 셀에서 다양한 형태의 월 표기(2026.9월, 2026년 9월, 2026-09 등) 감지
+      // [월 식별]: 셀에서 다양한 형태의 월 표기(2026.9월, 2026년 10월, 2026-10, 10월 등)를 모두 유연하게 감지
       for (let c = 0; c < row.length; c++) {
         const cellStr = String(row[c] || '').trim();
-        // 1) 연도와 월이 함께 있는 경우
-        const fullMatch = cellStr.match(/(\d{4})[.\-년\s]+(\d{1,2})월?/);
+        if (!cellStr) continue;
+
+        // 1) 연도와 월이 함께 있는 경우 (예: "2026.10월", "2026년 10월", "2026-10", "2026.10")
+        const fullMatch = cellStr.match(/(\d{4})[.\-년\s/]+(\d{1,2})(?:월)?/);
         if (fullMatch) {
-          currentYear = parseInt(fullMatch[1], 10);
-          currentMonth = parseInt(fullMatch[2], 10);
-          break;
+          // 단, 2026-09-01 같은 특정 일자 셀은 월 타이틀로 오인하지 않음
+          if (!cellStr.match(/\d{4}[.\-\/년\s]+\d{1,2}[.\-\/월\s]+\d{1,2}/)) {
+            currentYear = parseInt(fullMatch[1], 10);
+            currentMonth = parseInt(fullMatch[2], 10);
+            break;
+          }
         }
-        // 2) 단독 "M월"인 경우
-        const monthOnlyMatch = cellStr.match(/^(\d{1,2})월$/);
+        // 2) 단독 또는 제목 내 "M월"인 경우 (예: "10월", "10월 응급실 근무표")
+        const monthOnlyMatch = cellStr.match(/(?:^|[^\d])(\d{1,2})월/);
         if (monthOnlyMatch) {
           currentMonth = parseInt(monthOnlyMatch[1], 10);
           break;
@@ -310,11 +315,10 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
         while (nextR < rawRows.length) {
           const candidateRow = rawRows[nextR] || [];
 
-          // 또 다른 요일 행이 나타나면 건너뜀
+          // 만약 또 다른 요일 행이 나타나면 새로운 달(10월, 11월...)의 시작이므로 현재 블록 종료(break)!
           const isAnotherDayOfWeek = candidateRow.some(c => String(c).trim() === '일') && candidateRow.some(c => String(c).trim() === '월');
           if (isAnotherDayOfWeek) {
-            nextR++;
-            continue;
+            break;
           }
 
           // 현재 행(candidateRow)에서 유효한 날짜가 있는지 먼저 검사!
@@ -327,15 +331,17 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
             }
           }
 
-          // [월 헤더 검사 안전화]: 유효 날짜가 전혀 없는 행인 경우에만 다음 월 헤더 검사를 수행하여 조기 break 방지!
+          // [월 헤더 검사]: 유효 날짜가 전혀 없는 행인 경우에만 다음 월 헤더 검사를 수행하여 조기 탈출(break) 방지!
           if (validDatesInRow.length === 0) {
             const isNextMonthTitle = candidateRow.some(cell => {
               const cs = String(cell || '').trim();
               if (!cs) return false;
               if (cs.match(/\d{4}[.\-\/년\s]+\d{1,2}[.\-\/월\s]+\d{1,2}/)) return false;
-              return Boolean(cs.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || cs.match(/^(\d{1,2})월$/));
+              return Boolean(cs.match(/(\d{4})[.\-년\s/]+(\d{1,2})/) || cs.match(/\d{1,2}월/));
             });
-            if (isNextMonthTitle) break;
+            if (isNextMonthTitle) {
+              break; // 다음 달 헤더 발견 시 탈출하여 외부 루프에서 다음 달 파싱 수행!
+            }
           }
 
           // [날짜 행 발견]: 유효 날짜가 1개 이상 들어있는 행
@@ -351,7 +357,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
               }
               const isMonthHeader = potentialShiftRow.some(c => {
                 const s = String(c || '').trim();
-                return Boolean(s.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || s.match(/^(\d{1,2})월$/));
+                return Boolean(s.match(/(\d{4})[.\-년\s/]+(\d{1,2})/) || s.match(/\d{1,2}월/));
               });
               if (isMonthHeader) {
                 break;
@@ -377,7 +383,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                 continue;
               }
 
-              // 무조건 normalizeDateKey를 사용하여 완벽한 YYYY-MM-DD(예: 2026-09-01)로 포맷 통일
+              // 무조건 normalizeDateKey를 사용하여 완벽한 YYYY-MM-DD(예: 2026-09-01, 2026-10-01)로 포맷 통일
               const dateStr = normalizeDateKey(cellYear, cellMonth, dayNum);
               const yearMonth = `${cellYear}-${String(cellMonth).padStart(2, '0')}`;
 
@@ -396,9 +402,41 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
 
               const shifts: ShiftItem[] = [];
 
-              // [핵심 요구사항]: 오직 셀 내부의 '줄 바꿈(\n)' 갯수(lines.length) 기준으로 근무조 배정!
+              // [요구사항 1]: M 근무 분리 헬퍼 (M1과 M2가 위아래 2개 줄로 예쁘게 분리되도록 배정)
+              const pushMidShifts = (lineText: string) => {
+                const workers = cleanWorkers(lineText);
+                if (workers.length >= 2) {
+                  // 근무자가 2명 이상이면 M1과 M2로 분리하여 2개 줄 렌더링 지원!
+                  const m1Workers = [workers[0]];
+                  const m2Workers = workers.slice(1);
+                  shifts.push({
+                    code: 'M1',
+                    name: '미드1',
+                    time: '14:00 - 24:00',
+                    workers: m1Workers,
+                    hasTargetUser: m1Workers.some(w => w.includes('현우')),
+                  });
+                  shifts.push({
+                    code: 'M2',
+                    name: '미드2',
+                    time: '14:00 - 24:00',
+                    workers: m2Workers,
+                    hasTargetUser: m2Workers.some(w => w.includes('현우')),
+                  });
+                } else if (workers.length === 1) {
+                  shifts.push({
+                    code: 'M1',
+                    name: '미드',
+                    time: '14:00 - 24:00',
+                    workers,
+                    hasTargetUser: workers.some(w => w.includes('현우')),
+                  });
+                }
+              };
+
+              // [근무조 배정 알고리즘]
               if (lines.length >= 3) {
-                // 3줄: [0]=D, [1]=M, [2]=N
+                // 3줄: [0]=D, [1]=M1/M2, [2]=N
                 if (lines[0]) {
                   const workers = cleanWorkers(lines[0]);
                   if (workers.length > 0) {
@@ -412,16 +450,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                   }
                 }
                 if (lines[1]) {
-                  const workers = cleanWorkers(lines[1]);
-                  if (workers.length > 0) {
-                    shifts.push({
-                      code: 'M',
-                      name: '미드',
-                      time: '14:00 - 24:00',
-                      workers,
-                      hasTargetUser: workers.some(w => w.includes('현우')),
-                    });
-                  }
+                  pushMidShifts(lines[1]);
                 }
                 if (lines[2]) {
                   const workers = cleanWorkers(lines[2]);
@@ -436,18 +465,9 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                   }
                 }
               } else if (lines.length === 2) {
-                // 유효 데이터가 2줄인 경우 (평일/공휴일 무관): D는 없음(투명 빈칸)! [0]은 M, [1]은 N에 배정
+                // 2줄: D는 없음(투명 빈칸)! [0]=M1/M2, [1]=N
                 if (lines[0]) {
-                  const workers = cleanWorkers(lines[0]);
-                  if (workers.length > 0) {
-                    shifts.push({
-                      code: 'M',
-                      name: '미드',
-                      time: '14:00 - 24:00',
-                      workers,
-                      hasTargetUser: workers.some(w => w.includes('현우')),
-                    });
-                  }
+                  pushMidShifts(lines[0]);
                 }
                 if (lines[1]) {
                   const workers = cleanWorkers(lines[1]);
@@ -463,16 +483,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                 }
               } else if (lines.length === 1) {
                 // 1줄: M 위치에 배정
-                const workers = cleanWorkers(lines[0]);
-                if (workers.length > 0) {
-                  shifts.push({
-                    code: 'M',
-                    name: '미드',
-                    time: '14:00 - 24:00',
-                    workers,
-                    hasTargetUser: workers.some(w => w.includes('현우')),
-                  });
-                }
+                pushMidShifts(lines[0]);
               }
 
               if (!processedDateKeys.has(dateStr)) {
