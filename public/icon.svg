@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#0D0D0D"/>
+  <g transform="translate(121, 116)">
+    <!-- 캘린더 흰색 본체 -->
+    <rect x="0" y="16" width="270" height="280" rx="36" fill="#FFFFFF"/>
+    <!-- 캘린더 상단 빨간색 헤더 -->
+    <path d="M 0 52 C 0 32 16 16 36 16 L 234 16 C 254 16 270 32 270 52 L 270 88 L 0 88 Z" fill="#EE4343"/>
+    <!-- 상단 2개의 검은색 바인더 링 -->
+    <rect x="52" y="0" width="20" height="34" rx="10" fill="#0D0D0D"/>
+    <rect x="198" y="0" width="20" height="34" rx="10" fill="#0D0D0D"/>
+    <!-- 정중앙 빨간색 십자 마크 -->
+    <rect x="75" y="160" width="120" height="42" rx="14" fill="#EE4343"/>
+    <rect x="114" y="121" width="42" height="120" rx="14" fill="#EE4343"/>
+  </g>
+</svg>
