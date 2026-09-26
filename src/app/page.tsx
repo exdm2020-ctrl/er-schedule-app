@@ -52,9 +52,9 @@ function base64ToBuffer(base64: string): ArrayBuffer {
 // ==========================================
 // 1. 타입 정의
 // ==========================================
-export type ShiftCode = 'D' | 'M1' | 'M2' | 'M' | 'H' | 'N';
+type ShiftCode = 'D' | 'M1' | 'M2' | 'M' | 'H' | 'N';
 
-export interface ShiftItem {
+interface ShiftItem {
   code: ShiftCode;
   name: string;        // "데이", "미드1", "미드2", "주말 헬퍼" 등
   time: string;        // "08:00 - 15:00"
@@ -62,7 +62,7 @@ export interface ShiftItem {
   hasTargetUser: boolean; // "현우" 포함 여부
 }
 
-export interface ParsedDay {
+interface ParsedDay {
   date: string;        // "2026-09-25"
   yearMonth: string;   // "2026-09"
   dayNum: number;      // 25
@@ -74,194 +74,209 @@ export interface ParsedDay {
   rawText: string;
 }
 
-export type ViewMode = '1month' | '1year';
+type ViewMode = '1month' | '1year';
 
 // ==========================================
-// 2. 엑셀 파싱 핵심 알고리즘 (지정 규격 완벽 준수)
+// [날짜 표준화 헬퍼]: 무조건 로컬 기준의 명확한 YYYY-MM-DD (예: 2026-09-01) 포맷 보장
+// ==========================================
+function normalizeDateKey(year: number | string, month: number | string, day: number | string): string {
+  const y = String(year).trim();
+  const m = String(month).trim().padStart(2, '0');
+  const d = String(day).trim().padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// ==========================================
+// 2. 엑셀 파싱 핵심 알고리즘 (모든 시트 순회 & 매달 1일 누락 방지 & 1Y 완벽 지원)
 // ==========================================
 function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
   const workbook = XLSX.read(fileBuffer, { type: 'array', cellDates: false });
   if (!workbook.SheetNames.length) return [];
 
-  // sheet[0] 읽기
-  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rawRows: any[][] = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    raw: false,
-    defval: '',
-  });
-
-  let currentYearMonth: string | null = null;
   const parsedData: ParsedDay[] = [];
   const processedDateKeys = new Set<string>();
 
-  for (let r = 0; r < rawRows.length; r++) {
-    const row = rawRows[r] || [];
+  // [버그 2 해결]: 엑셀 파일 내의 모든 시트를 순회하여 1년 12개월 데이터를 누락 없이 파싱
+  workbook.SheetNames.forEach(sheetName => {
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) return;
 
-    // [월 식별]: 셀에서 /(\d{4})\.(\d{1,2})월/ 매칭 시 currentYearMonth = YYYY-MM 저장
-    for (let c = 0; c < row.length; c++) {
-      const cellStr = String(row[c] || '').trim();
-      const monthMatch = cellStr.match(/(\d{4})\.(\d{1,2})월/);
-      if (monthMatch) {
-        const y = monthMatch[1];
-        const m = String(parseInt(monthMatch[2], 10)).padStart(2, '0');
-        currentYearMonth = `${y}-${m}`;
-        break;
+    const rawRows: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      raw: false,
+      defval: '',
+    });
+
+    let currentYearMonth: string | null = null;
+    let fallbackYear = 2026;
+
+    // 시트 이름에서 연/월 유추 (예: "2026.09", "2026-9", "9월")
+    const sheetYmMatch = sheetName.match(/(\d{4})[.\-년\s]+(\d{1,2})/);
+    if (sheetYmMatch) {
+      fallbackYear = parseInt(sheetYmMatch[1], 10);
+      currentYearMonth = `${fallbackYear}-${String(parseInt(sheetYmMatch[2], 10)).padStart(2, '0')}`;
+    } else {
+      const sheetOnlyMonth = sheetName.match(/(\d{1,2})월/);
+      if (sheetOnlyMonth) {
+        currentYearMonth = `${fallbackYear}-${String(parseInt(sheetOnlyMonth[1], 10)).padStart(2, '0')}`;
       }
     }
 
-    if (!currentYearMonth) continue;
+    for (let r = 0; r < rawRows.length; r++) {
+      const row = rawRows[r] || [];
 
-    // [요일 식별]: row에 "일", "월" 등이 나타나면 다음 행은 '날짜', 그 다음 행은 '근무자'
-    const rowStrArr = row.map(cell => String(cell || '').trim());
-    const hasDaysOfWeek = rowStrArr.includes('일') && rowStrArr.includes('월');
-
-    if (hasDaysOfWeek) {
-      let nextR = r + 1;
-
-      while (nextR < rawRows.length) {
-        const dateRow = rawRows[nextR] || [];
-        const shiftRow = rawRows[nextR + 1] || [];
-
-        // 새로운 월 헤더가 나오면 현재 월 주(Week) 파싱 중단
-        const hasNextMonthHeader = dateRow.some(cell => String(cell || '').match(/(\d{4})\.(\d{1,2})월/));
-        if (hasNextMonthHeader) break;
-
-        const isAnotherDayOfWeekRow = dateRow.some(c => String(c).trim() === '일') && dateRow.some(c => String(c).trim() === '월');
-        if (isAnotherDayOfWeekRow) {
-          nextR++;
-          continue;
+      // [월 식별]: 셀에서 다양한 형태의 월 표기(2026.9월, 2026년 9월, 2026-09 등) 감지
+      for (let c = 0; c < row.length; c++) {
+        const cellStr = String(row[c] || '').trim();
+        // 1) 연도와 월이 함께 있는 경우 (예: "2026.09월", "2026년 9월", "2026. 9")
+        const fullMatch = cellStr.match(/(\d{4})[.\-년\s]+(\d{1,2})월?/);
+        if (fullMatch) {
+          fallbackYear = parseInt(fullMatch[1], 10);
+          const m = String(parseInt(fullMatch[2], 10)).padStart(2, '0');
+          currentYearMonth = `${fallbackYear}-${m}`;
+          break;
         }
+        // 2) 단독 "M월"인 경우
+        const monthOnlyMatch = cellStr.match(/^(\d{1,2})월$/);
+        if (monthOnlyMatch) {
+          const m = String(parseInt(monthOnlyMatch[1], 10)).padStart(2, '0');
+          currentYearMonth = `${fallbackYear}-${m}`;
+          break;
+        }
+      }
 
-        let foundValidDateInThisRow = false;
+      if (!currentYearMonth) continue;
 
-        for (let col = 0; col < 7; col++) {
-          const dateCellVal = String(dateRow[col] || '').trim();
-          // [날짜 추출]: 날짜 셀 텍스트(예: "25(추석)")에서 정규식 /\d+/로 숫자만 추출
-          const dayMatch = dateCellVal.match(/\d+/);
-          if (!dayMatch) continue;
+      // [요일 식별]: row에 "일", "월" 등이 나타나면 다음 행부터 날짜 및 근무자 행 탐색
+      const rowStrArr = row.map(cell => String(cell || '').trim());
+      const hasDaysOfWeek = rowStrArr.includes('일') && rowStrArr.includes('월');
 
-          foundValidDateInThisRow = true;
-          const dayNum = parseInt(dayMatch[0], 10);
-          if (dayNum < 1 || dayNum > 31) continue;
+      if (hasDaysOfWeek) {
+        let nextR = r + 1;
+        let hasSeenDayOneInCurrentBlock = false;
 
-          // 공휴일 메모 (예: "25(추석연휴)" -> "추석연휴")
-          const memoMatch = dateCellVal.match(/\((.*?)\)/);
-          const holidayNote = memoMatch ? memoMatch[1].trim() : null;
+        while (nextR < rawRows.length) {
+          const dateRow = rawRows[nextR] || [];
+          const shiftRow = rawRows[nextR + 1] || [];
 
-          const dateStr = `${currentYearMonth}-${String(dayNum).padStart(2, '0')}`;
-          const [yStr, mStr] = currentYearMonth.split('-');
-          const dateObj = new Date(parseInt(yStr, 10), parseInt(mStr, 10) - 1, dayNum);
-          const dayOfWeek = dateObj.getDay();
-          const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-          const isWeekendOrHol = isWeekend || Boolean(holidayNote);
+          // 새로운 월 헤더가 나오면 현재 월 블록 파싱 종료
+          const hasNextMonthHeader = dateRow.some(cell => {
+            const cs = String(cell || '').trim();
+            return cs.match(/(\d{4})[.\-년\s]+(\d{1,2})월?/) || cs.match(/^(\d{1,2})월$/);
+          });
+          if (hasNextMonthHeader) break;
 
-          // [근무자 줄바꿈(\n) 분리 규칙 적용]
-          const shiftCellVal = String(shiftRow[col] || '').trim();
-          const lines = shiftCellVal.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          const isAnotherDayOfWeekRow = dateRow.some(c => String(c).trim() === '일') && dateRow.some(c => String(c).trim() === '월');
+          if (isAnotherDayOfWeekRow) {
+            nextR++;
+            continue;
+          }
 
-          const shifts: ShiftItem[] = [];
+          let foundValidDateInThisRow = false;
 
-          // "현우" 이름 정리 함수 (박현우 -> 현우)
-          const cleanWorkers = (lineStr: string) => {
-            return lineStr
-              .split(/[\/,]/)
-              .map(w => w.trim())
-              .filter(Boolean)
-              .map(w => (w === '박현우' ? '현우' : w));
-          };
+          for (let col = 0; col < 7; col++) {
+            const dateCellVal = String(dateRow[col] || '').trim();
+            if (!dateCellVal) continue;
 
-          if (isWeekendOrHol) {
-            // * 주말/공휴일 무조건 3줄: [0]=D, [1]=M/H, [2]=N
-            if (lines[0]) {
-              const workers = cleanWorkers(lines[0]);
-              shifts.push({
-                code: 'D',
-                name: '주말 데이',
-                time: '08:00 - 16:00',
-                workers,
-                hasTargetUser: workers.some(w => w.includes('현우')),
-              });
-            }
-            if (lines[1]) {
-              const lineWorkers = cleanWorkers(lines[1]);
-              if (lineWorkers.length >= 2) {
-                const helperWorker = [lineWorkers[0]];
-                const midWorker = lineWorkers.slice(1);
-                shifts.push({
-                  code: 'H',
-                  name: '주말 헬퍼',
-                  time: '14:00 - 23:00',
-                  workers: helperWorker,
-                  hasTargetUser: helperWorker.some(w => w.includes('현우')),
-                });
-                shifts.push({
-                  code: 'M',
-                  name: '주말 미드',
-                  time: '15:00 - 24:00',
-                  workers: midWorker,
-                  hasTargetUser: midWorker.some(w => w.includes('현우')),
-                });
+            // [버그 1 해결]: "9/1", "9.1", "1일", "1(화)", "01", "1" 등 모든 패턴에서 정확한 '일(Day)' 숫자 추출
+            let dayNum: number | null = null;
+
+            // 1) "9/1" 또는 "9.1" 형태인 경우 뒤쪽 숫자를 일자로 추출
+            const mdMatch = dateCellVal.match(/\b\d{1,2}[\/.](\d{1,2})\b/);
+            if (mdMatch) {
+              dayNum = parseInt(mdMatch[1], 10);
+            } else {
+              // 2) "1일", "1(화)" 또는 숫자만 있는 경우
+              const dMatch = dateCellVal.match(/^(\d{1,2})/);
+              if (dMatch) {
+                dayNum = parseInt(dMatch[1], 10);
               } else {
-                shifts.push({
-                  code: 'H',
-                  name: '주말 헬퍼/미드',
-                  time: '14:00 - 24:00',
-                  workers: lineWorkers,
-                  hasTargetUser: lineWorkers.some(w => w.includes('현우')),
-                });
+                const anyNum = dateCellVal.match(/\d+/);
+                if (anyNum) dayNum = parseInt(anyNum[0], 10);
               }
             }
-            if (lines[2]) {
-              const workers = cleanWorkers(lines[2]);
-              shifts.push({
-                code: 'N',
-                name: '주말 나이트',
-                time: '00:00 - 익일 08:00',
-                workers,
-                hasTargetUser: workers.some(w => w.includes('현우')),
-              });
+
+            if (dayNum === null || isNaN(dayNum) || dayNum < 1 || dayNum > 31) continue;
+
+            // 1주차에서 1일 이전 요일(지난달 말일 25~31)이 1일 앞에 섞여 있는 경우 방어
+            if (!hasSeenDayOneInCurrentBlock && dayNum >= 20) {
+              continue;
             }
-          } else {
-            // * 평일(월~금)
-            if (lines.length >= 3) {
-              // 평일 3줄: [0]=D, [1]=M1/M2, [2]=N
+            if (dayNum === 1) {
+              hasSeenDayOneInCurrentBlock = true;
+            }
+
+            foundValidDateInThisRow = true;
+
+            // 공휴일 메모 (예: "1(신정)", "25(추석)")
+            const memoMatch = dateCellVal.match(/\((.*?)\)/);
+            const holidayNote = memoMatch ? memoMatch[1].trim() : null;
+
+            // [버그 1 해결]: 무조건 normalizeDateKey를 사용하여 완벽한 YYYY-MM-DD(예: 2026-09-01)로 포맷 통일
+            const [yStr, mStr] = currentYearMonth.split('-');
+            const yearNum = parseInt(yStr, 10);
+            const monthNum = parseInt(mStr, 10);
+            const dateStr = normalizeDateKey(yearNum, monthNum, dayNum);
+
+            // 로컬 날짜 객체로 요일 계산
+            const dateObj = new Date(yearNum, monthNum - 1, dayNum);
+            const dayOfWeek = dateObj.getDay();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+            const isWeekendOrHol = isWeekend || Boolean(holidayNote);
+
+            // [근무자 줄바꿈(\n) 분리 규칙 적용]
+            const shiftCellVal = String(shiftRow[col] || '').trim();
+            const lines = shiftCellVal.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+            const shifts: ShiftItem[] = [];
+
+            // "현우" 이름 정리 함수 (박현우 -> 현우)
+            const cleanWorkers = (lineStr: string) => {
+              return lineStr
+                .split(/[\/,]/)
+                .map(w => w.trim())
+                .filter(Boolean)
+                .map(w => (w === '박현우' ? '현우' : w));
+            };
+
+            if (isWeekendOrHol) {
+              // * 주말/공휴일 무조건 3줄: [0]=D, [1]=M/H, [2]=N
               if (lines[0]) {
                 const workers = cleanWorkers(lines[0]);
                 shifts.push({
                   code: 'D',
-                  name: '평일 데이',
-                  time: '08:00 - 15:00',
+                  name: '주말 데이',
+                  time: '08:00 - 16:00',
                   workers,
                   hasTargetUser: workers.some(w => w.includes('현우')),
                 });
               }
               if (lines[1]) {
-                const midWorkers = cleanWorkers(lines[1]);
-                if (midWorkers.length >= 2) {
-                  const m1 = [midWorkers[0]];
-                  const m2 = midWorkers.slice(1);
+                const lineWorkers = cleanWorkers(lines[1]);
+                if (lineWorkers.length >= 2) {
+                  const helperWorker = [lineWorkers[0]];
+                  const midWorker = lineWorkers.slice(1);
                   shifts.push({
-                    code: 'M1',
-                    name: '평일 미드1',
-                    time: '14:00 - 24:00',
-                    workers: m1,
-                    hasTargetUser: m1.some(w => w.includes('현우')),
+                    code: 'H',
+                    name: '주말 헬퍼',
+                    time: '14:00 - 23:00',
+                    workers: helperWorker,
+                    hasTargetUser: helperWorker.some(w => w.includes('현우')),
                   });
                   shifts.push({
-                    code: 'M2',
-                    name: '평일 미드2',
-                    time: '14:00 - 24:00',
-                    workers: m2,
-                    hasTargetUser: m2.some(w => w.includes('현우')),
+                    code: 'M',
+                    name: '주말 미드',
+                    time: '15:00 - 24:00',
+                    workers: midWorker,
+                    hasTargetUser: midWorker.some(w => w.includes('현우')),
                   });
                 } else {
                   shifts.push({
-                    code: 'M1',
-                    name: '평일 미드',
+                    code: 'H',
+                    name: '주말 헬퍼/미드',
                     time: '14:00 - 24:00',
-                    workers: midWorkers,
-                    hasTargetUser: midWorkers.some(w => w.includes('현우')),
+                    workers: lineWorkers,
+                    hasTargetUser: lineWorkers.some(w => w.includes('현우')),
                   });
                 }
               }
@@ -269,129 +284,185 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                 const workers = cleanWorkers(lines[2]);
                 shifts.push({
                   code: 'N',
-                  name: '평일 나이트',
-                  time: '00:00 - 익일 07:30',
+                  name: '주말 나이트',
+                  time: '00:00 - 익일 08:00',
                   workers,
                   hasTargetUser: workers.some(w => w.includes('현우')),
                 });
               }
-            } else if (lines.length === 2) {
-              // 평일 2줄: [0]=M1/M2, [1]=N (데이 없음)
-              if (lines[0]) {
-                const midWorkers = cleanWorkers(lines[0]);
-                if (midWorkers.length >= 2) {
-                  const m1 = [midWorkers[0]];
-                  const m2 = midWorkers.slice(1);
+            } else {
+              // * 평일(월~금)
+              if (lines.length >= 3) {
+                if (lines[0]) {
+                  const workers = cleanWorkers(lines[0]);
                   shifts.push({
-                    code: 'M1',
-                    name: '평일 미드1',
-                    time: '14:00 - 24:00',
-                    workers: m1,
-                    hasTargetUser: m1.some(w => w.includes('현우')),
-                  });
-                  shifts.push({
-                    code: 'M2',
-                    name: '평일 미드2',
-                    time: '14:00 - 24:00',
-                    workers: m2,
-                    hasTargetUser: m2.some(w => w.includes('현우')),
-                  });
-                } else {
-                  shifts.push({
-                    code: 'M1',
-                    name: '평일 미드',
-                    time: '14:00 - 24:00',
-                    workers: midWorkers,
-                    hasTargetUser: midWorkers.some(w => w.includes('현우')),
+                    code: 'D',
+                    name: '평일 데이',
+                    time: '08:00 - 15:00',
+                    workers,
+                    hasTargetUser: workers.some(w => w.includes('현우')),
                   });
                 }
-              }
-              if (lines[1]) {
-                const workers = cleanWorkers(lines[1]);
+                if (lines[1]) {
+                  const midWorkers = cleanWorkers(lines[1]);
+                  if (midWorkers.length >= 2) {
+                    const m1 = [midWorkers[0]];
+                    const m2 = midWorkers.slice(1);
+                    shifts.push({
+                      code: 'M1',
+                      name: '평일 미드1',
+                      time: '14:00 - 24:00',
+                      workers: m1,
+                      hasTargetUser: m1.some(w => w.includes('현우')),
+                    });
+                    shifts.push({
+                      code: 'M2',
+                      name: '평일 미드2',
+                      time: '14:00 - 24:00',
+                      workers: m2,
+                      hasTargetUser: m2.some(w => w.includes('현우')),
+                    });
+                  } else {
+                    shifts.push({
+                      code: 'M1',
+                      name: '평일 미드',
+                      time: '14:00 - 24:00',
+                      workers: midWorkers,
+                      hasTargetUser: midWorkers.some(w => w.includes('현우')),
+                    });
+                  }
+                }
+                if (lines[2]) {
+                  const workers = cleanWorkers(lines[2]);
+                  shifts.push({
+                    code: 'N',
+                    name: '평일 나이트',
+                    time: '00:00 - 익일 07:30',
+                    workers,
+                    hasTargetUser: workers.some(w => w.includes('현우')),
+                  });
+                }
+              } else if (lines.length === 2) {
+                if (lines[0]) {
+                  const midWorkers = cleanWorkers(lines[0]);
+                  if (midWorkers.length >= 2) {
+                    const m1 = [midWorkers[0]];
+                    const m2 = midWorkers.slice(1);
+                    shifts.push({
+                      code: 'M1',
+                      name: '평일 미드1',
+                      time: '14:00 - 24:00',
+                      workers: m1,
+                      hasTargetUser: m1.some(w => w.includes('현우')),
+                    });
+                    shifts.push({
+                      code: 'M2',
+                      name: '평일 미드2',
+                      time: '14:00 - 24:00',
+                      workers: m2,
+                      hasTargetUser: m2.some(w => w.includes('현우')),
+                    });
+                  } else {
+                    shifts.push({
+                      code: 'M1',
+                      name: '평일 미드',
+                      time: '14:00 - 24:00',
+                      workers: midWorkers,
+                      hasTargetUser: midWorkers.some(w => w.includes('현우')),
+                    });
+                  }
+                }
+                if (lines[1]) {
+                  const workers = cleanWorkers(lines[1]);
+                  shifts.push({
+                    code: 'N',
+                    name: '평일 나이트',
+                    time: '00:00 - 익일 07:30',
+                    workers,
+                    hasTargetUser: workers.some(w => w.includes('현우')),
+                  });
+                }
+              } else if (lines.length === 1) {
+                const workers = cleanWorkers(lines[0]);
                 shifts.push({
-                  code: 'N',
-                  name: '평일 나이트',
-                  time: '00:00 - 익일 07:30',
+                  code: 'M1',
+                  name: '평일 근무',
+                  time: '14:00 - 24:00',
                   workers,
                   hasTargetUser: workers.some(w => w.includes('현우')),
                 });
               }
-            } else if (lines.length === 1) {
-              const workers = cleanWorkers(lines[0]);
-              shifts.push({
-                code: 'M1',
-                name: '평일 근무',
-                time: '14:00 - 24:00',
-                workers,
-                hasTargetUser: workers.some(w => w.includes('현우')),
+            }
+
+            if (!processedDateKeys.has(dateStr)) {
+              processedDateKeys.add(dateStr);
+              parsedData.push({
+                date: dateStr,
+                yearMonth: currentYearMonth,
+                dayNum,
+                dayOfWeek,
+                isWeekend,
+                holidayNote,
+                shifts,
+                hasTargetUser: shifts.some(s => s.hasTargetUser),
+                rawText: shiftCellVal,
               });
             }
           }
 
-          if (!processedDateKeys.has(dateStr)) {
-            processedDateKeys.add(dateStr);
-            parsedData.push({
-              date: dateStr,
-              yearMonth: currentYearMonth,
-              dayNum,
-              dayOfWeek,
-              isWeekend,
-              holidayNote,
-              shifts,
-              hasTargetUser: shifts.some(s => s.hasTargetUser),
-              rawText: shiftCellVal,
-            });
+          if (!foundValidDateInThisRow) {
+            nextR++;
+          } else {
+            nextR += 2;
           }
         }
 
-        if (!foundValidDateInThisRow) {
-          nextR++;
-        } else {
-          nextR += 2;
-        }
+        r = nextR - 1;
       }
-
-      r = nextR - 1;
     }
-  }
+  });
+
+  // 날짜순으로 정렬
+  parsedData.sort((a, b) => a.date.localeCompare(b.date));
 
   return parsedData;
 }
 
 // ==========================================
-// 3. 초기 탑재용 2026년 9~11월 샘플 생성
+// 3. 초기 탑재용 2026년 1~12월 전체 1년 치(365일) 풀 샘플 데이터 생성
 // ==========================================
 function generateInitialSampleData(): ParsedDay[] {
   const doctors = ['현우', '김민준', '이서연', '정유진', '최준호', '윤도윤', '강예은', '임재현'];
-  const months = [
-    { ym: '2026-09', days: 30 },
-    { ym: '2026-10', days: 31 },
-    { ym: '2026-11', days: 30 },
-  ];
-
   const list: ParsedDay[] = [];
+  const year = 2026;
 
-  months.forEach(({ ym, days }) => {
-    const [y, m] = ym.split('-').map(Number);
+  // 1월부터 12월까지 전체 월 생성
+  for (let m = 1; m <= 12; m++) {
+    const daysInMonth = new Date(year, m, 0).getDate();
+    const ym = `${year}-${String(m).padStart(2, '0')}`;
 
-    for (let d = 1; d <= days; d++) {
-      const dateStr = `${ym}-${String(d).padStart(2, '0')}`;
-      const dateObj = new Date(y, m - 1, d);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = normalizeDateKey(year, m, d);
+      const dateObj = new Date(year, m - 1, d);
       const dayOfWeek = dateObj.getDay();
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
       let holidayNote: string | null = null;
-      if (ym === '2026-09') {
-        if (d === 24) holidayNote = '추석연휴';
-        if (d === 25) holidayNote = '추석';
-        if (d === 26) holidayNote = '추석연휴';
-      } else if (ym === '2026-10') {
-        if (d === 3) holidayNote = '개천절';
-        if (d === 9) holidayNote = '한글날';
-      }
+      if (m === 1 && d === 1) holidayNote = '신정';
+      else if (m === 2 && (d >= 16 && d <= 18)) holidayNote = '설연휴';
+      else if (m === 3 && d === 1) holidayNote = '삼일절';
+      else if (m === 5 && d === 5) holidayNote = '어린이날';
+      else if (m === 5 && d === 24) holidayNote = '부처님오신날';
+      else if (m === 6 && d === 6) holidayNote = '현충일';
+      else if (m === 8 && d === 15) holidayNote = '광복절';
+      else if (m === 9 && (d === 24 || d === 26)) holidayNote = '추석연휴';
+      else if (m === 9 && d === 25) holidayNote = '추석';
+      else if (m === 10 && d === 3) holidayNote = '개천절';
+      else if (m === 10 && d === 9) holidayNote = '한글날';
+      else if (m === 12 && d === 25) holidayNote = '크리스마스';
 
       const isWeekendOrHol = isWeekend || Boolean(holidayNote);
-      const seed = (y * 365 + m * 31 + d) % doctors.length;
+      const seed = (year * 365 + m * 31 + d) % doctors.length;
       const getDoc = (offset: number) => doctors[(seed + offset) % doctors.length];
 
       const shifts: ShiftItem[] = [];
@@ -439,7 +510,7 @@ function generateInitialSampleData(): ParsedDay[] {
         rawText: shifts.map(s => `${s.code} ${s.workers.join('/')}`).join('\n'),
       });
     }
-  });
+  }
 
   return list;
 }
@@ -744,10 +815,24 @@ export default function ERSchedulePage() {
     setPinInput('');
   };
 
-  // 날짜 맵
+  // [버그 1 완벽 해결]: 날짜 맵 (모든 날짜 키의 정규화 보장 - YYYY-MM-DD 매칭 100% 보장)
   const scheduleMap = useMemo(() => {
     const map = new Map<string, ParsedDay>();
-    scheduleList.forEach(day => map.set(day.date, day));
+    scheduleList.forEach(day => {
+      // 1) 원본 키 매핑
+      map.set(day.date, day);
+
+      // 2) YYYY-MM-DD 정규화 키 매핑 (1일이 2026-09-01로 100% 일치)
+      const parts = day.date.split('-');
+      if (parts.length === 3) {
+        const normKey = normalizeDateKey(parts[0], parts[1], parts[2]);
+        map.set(normKey, day);
+
+        // 비패딩 키(예: 2026-9-1)도 혹시 모를 상황을 대비해 등록
+        const unpaddedKey = `${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parseInt(parts[2], 10)}`;
+        map.set(unpaddedKey, day);
+      }
+    });
     return map;
   }, [scheduleList]);
 
@@ -1163,7 +1248,7 @@ export default function ERSchedulePage() {
         {/* ========================================================= */}
         {/* 2. 달력 컨트롤: [YYYY년 M월] 확대 및 클릭 시 네이티브 Date Picker 열기, [Now / 1M / 1Y] 탭 */}
         {/* ========================================================= */}
-        <div className="px-4 pt-4 pb-3.5 space-y-3.5 border-b border-zinc-900 bg-zinc-950">
+        <div className="px-4 pt-2.5 pb-2 space-y-2 border-b border-zinc-900 bg-zinc-950">
           <div className="flex items-center justify-between">
             {/* 이전/다음 달 이동 및 대형 [YYYY년 M월] 버튼 */}
             <div className="flex items-center gap-1.5">
@@ -1262,9 +1347,9 @@ export default function ERSchedulePage() {
         </div>
 
         {/* ========================================================= */}
-        {/* 3. 달력 그리드 영역 (세로 여백을 충분히 확보하여 본문이 화면 중앙으로 안정감 있게 내려오도록 조정) */}
+        {/* 3. 달력 그리드 영역 (세로 여백 상향 조정으로 화면 상단 쪽에 안정감 있게 배치) */}
         {/* ========================================================= */}
-        <main className="flex-1 p-3 pt-6 space-y-8 pb-safe">
+        <main className="flex-1 p-2.5 pt-2 space-y-5 pb-safe">
           {monthsToRender.map(({ year, month }) => {
             const ymStr = `${year}-${String(month).padStart(2, '0')}`;
             const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
@@ -1306,8 +1391,8 @@ export default function ERSchedulePage() {
                   {/* 해당 월 날짜들 */}
                   {Array.from({ length: daysInMonth }).map((_, idx) => {
                     const d = idx + 1;
-                    const dateStr = `${ymStr}-${String(d).padStart(2, '0')}`;
-                    const dayData = scheduleMap.get(dateStr);
+                    const dateStr = normalizeDateKey(year, month, d);
+                    const dayData = scheduleMap.get(dateStr) || scheduleMap.get(`${ymStr}-${String(d).padStart(2, '0')}`) || scheduleMap.get(`${year}-${month}-${d}`);
                     const dateObj = new Date(year, month - 1, d);
                     const dayOfWeek = dateObj.getDay();
                     const isSun = dayOfWeek === 0;
