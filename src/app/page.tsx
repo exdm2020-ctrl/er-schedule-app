@@ -15,7 +15,8 @@ import {
   Unlock,
   ShieldCheck,
   ScanFace,
-  KeyRound
+  KeyRound,
+  Save
 } from 'lucide-react';
 
 const FULL_BLEED_ICON_SVG =
@@ -425,10 +426,13 @@ function generateInitialSampleData(): ParsedDay[] {
 // 4. 메인 뷰 컴포넌트 (초-미니멀 Face ID / PIN 잠금화면 & 캘린더)
 // ==========================================
 export default function ERSchedulePage() {
-  // 인증 잠금 상태
-  const [isUnlocked, setIsUnlocked] = useState<boolean | null>(null);
+  // [요구사항 1]: 잠금화면 강제 - 앱 로드 및 새로고침 시 무조건 false 로 시작
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
+
+  // 수동 저장 성공 피드백 상태
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // 비밀번호 변경 모달 상태
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
@@ -458,45 +462,58 @@ export default function ERSchedulePage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // [핵심 1]: 브라우저 LocalStorage에서 기존 저장된 스케줄 데이터 및 인증 복원
-  useEffect(() => {
-    // 1. 인증 확인
-    const authSaved = localStorage.getItem(STORAGE_AUTH_KEY);
-    if (authSaved) {
-      setIsUnlocked(true);
-    } else {
-      setIsUnlocked(false);
-    }
-
-    // 2. 스케줄 로컬스토리지 복원
-    const cachedData = localStorage.getItem(STORAGE_DATA_KEY);
-    if (cachedData) {
-      try {
+  // [핵심 1-1]: LocalStorage에서 스케줄 데이터 안전하게 불러오기
+  const loadSavedSchedule = () => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const cachedData = localStorage.getItem(STORAGE_DATA_KEY);
+      if (cachedData) {
         const parsed = JSON.parse(cachedData);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setScheduleList(parsed);
           const [y, m] = parsed[0].yearMonth.split('-').map(Number);
           setCurrentYear(y);
           setCurrentMonth(m);
+          return true;
         }
+      }
+    } catch (e) {
+      console.error('Failed to load cached schedule data:', e);
+    }
+    return false;
+  };
+
+  // [핵심 1-2]: 앱 시작 시 무조건 잠금화면(false) 강제 & LocalStorage 데이터 자동 로드
+  useEffect(() => {
+    setIsUnlocked(false);
+    loadSavedSchedule();
+  }, []);
+
+  // [핵심 1-3]: 수동 저장 함수
+  const handleManualSave = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(scheduleList));
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2000);
       } catch (e) {
-        console.error('Failed to load cached schedule data:', e);
+        console.error('Failed to save to localStorage:', e);
+        alert('저장 중 오류가 발생했습니다.');
       }
     }
-  }, []);
+  };
 
   // Face ID / 간편 생체 인증 시뮬레이션
   const handleFaceID = async () => {
     if (window.PublicKeyCredential && window.navigator.credentials) {
       try {
         // WebAuthn 호출 시도 (아이폰 Face ID / Touch ID)
-        // 브라우저 지원 시 즉시 잠금 해제
       } catch (e) {
         // Fallback
       }
     }
-    // 원터치 Face ID 확인
-    localStorage.setItem(STORAGE_AUTH_KEY, 'faceid_verified');
+    // 원터치 Face ID 확인 후 최신 데이터 재로드 및 잠금 해제
+    loadSavedSchedule();
     setIsUnlocked(true);
   };
 
@@ -510,7 +527,7 @@ export default function ERSchedulePage() {
       if (next.length === 4) {
         const correctPin = getActivePin();
         if (next === correctPin) {
-          localStorage.setItem(STORAGE_AUTH_KEY, 'pin_verified');
+          loadSavedSchedule();
           setIsUnlocked(true);
           setPinInput('');
         } else {
@@ -948,6 +965,30 @@ export default function ERSchedulePage() {
           </h1>
 
           <div className="flex items-center gap-1.5">
+            {/* [요구사항 1]: 수동 저장 버튼 */}
+            <button
+              onClick={handleManualSave}
+              className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-all shadow-sm active:scale-95 ${
+                saveSuccess
+                  ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
+                  : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-700'
+              }`}
+              title="현재 스케줄 데이터 브라우저에 영구 저장"
+            >
+              {saveSuccess ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>저장됨</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5 text-yellow-400" />
+                  <span>저장</span>
+                </>
+              )}
+            </button>
+
+            {/* 엑셀 업로드 버튼 */}
             <button
               onClick={() => setIsUploadOpen(true)}
               className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-100 text-xs font-semibold px-3 py-1.5 rounded-lg border border-zinc-700 transition-all shadow-sm"
@@ -1096,36 +1137,37 @@ export default function ERSchedulePage() {
                     // Slot 3: Night (N)
                     const nightShift = dayData?.shifts.find(s => s.code === 'N');
 
-                    // 근무조 렌더링 헬퍼 컴포넌트 ("현우" 포함 시 전체 뱃지 노란색 Override)
-                    // 근무조 렌더링 헬퍼 컴포넌트 (메인 달력: 무채색화 & "현우" 노란색 하이라이트 + 밑줄 제거)
+                    // 근무조 렌더링 헬퍼 컴포넌트 (강제 한 줄 처리 + 현우 가운데 정렬 + 무채색화)
                     const renderShiftSlot = (shift?: ShiftItem) => {
                       if (!shift) return null;
                       const hasHyunwoo = shift.hasTargetUser;
 
-                      // [요구사항 2]: 메인 달력 화면에서는 다른 사람들의 스케줄은 색상을 넣지 않고
-                      // 다크 모드에 어울리는 무채색 텍스트(text-zinc-400 등)로 통일하여 아주 심플하게 렌더링
+                      // [요구사항 2 & 3]: 메인 달력 화면 - 다른 사람들은 무채색 통일, 현우는 노란색 + 가운데 정렬
                       let baseTheme = 'bg-zinc-900/90 border-zinc-800/80 text-zinc-400';
                       let codeTheme = 'text-zinc-500 font-bold';
+                      let alignClass = 'justify-start text-left';
 
-                      // "현우"가 포함된 경우 전체 뱃지 컨테이너를 노란색(#fde047)으로 Override!
+                      // "현우"가 포함된 경우 전체 뱃지 컨테이너를 노란색(#fde047)으로 Override + 가운데 정렬!
                       if (hasHyunwoo) {
                         baseTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-sm';
                         codeTheme = 'text-black font-black';
+                        alignClass = 'justify-center text-center';
                       }
 
                       return (
                         <div
-                          className={`flex flex-wrap items-center gap-1 p-0.5 rounded border text-[9px] md:text-[10px] leading-tight tracking-tighter break-words w-full transition-all ${baseTheme}`}
+                          className={`flex items-center gap-1 px-1 py-0.5 rounded border leading-tight w-full transition-all overflow-hidden ${baseTheme} ${alignClass}`}
+                          title={`${shift.code} ${shift.workers.join(', ')}`}
                         >
                           <span className={`shrink-0 ${codeTheme}`}>
                             {shift.code}
                           </span>
-                          <span className="break-words">
+                          {/* [요구사항 2]: text-[9px] truncate whitespace-nowrap overflow-hidden block w-full 강제 한 줄 처리 */}
+                          <span className={`text-[9px] truncate whitespace-nowrap overflow-hidden block w-full no-underline ${alignClass}`}>
                             {shift.workers.map((worker, wIdx) => {
                               const isMe = worker === '현우';
                               return (
                                 <React.Fragment key={wIdx}>
-                                  {/* "현우" 이름 아래에 생기는 밑줄(underline) 효과 완전히 제거(no-underline) */}
                                   <span className={isMe ? 'font-black no-underline' : 'no-underline'}>
                                     {worker}
                                   </span>
@@ -1246,34 +1288,16 @@ export default function ERSchedulePage() {
                 {selectedDay.shifts.map((shift, idx) => {
                   const hasHyunwoo = shift.hasTargetUser;
 
-                  // 모달 내 근무조별 기본 컬러 테마 (D: Sky, M1/M2: Orange, H: Emerald, N: Indigo)
-                  let cardTheme = 'bg-zinc-950 border-zinc-800 text-zinc-200';
-                  let codeBadgeTheme = 'bg-zinc-800 text-zinc-300';
-                  let workerTagTheme = 'bg-zinc-800 text-zinc-300';
+                  // [요구사항 3]: 팝업(모달)에서도 다른 근무자들은 색상 없이 다크 모드 무채색으로 통일!
+                  let cardTheme = 'bg-zinc-950/80 border-zinc-800 text-zinc-300';
+                  let codeBadgeTheme = 'bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold';
+                  let workerTagTheme = 'bg-zinc-900/60 border border-zinc-800 text-zinc-400';
 
-                  if (shift.code === 'D') {
-                    cardTheme = 'bg-sky-950/40 border-sky-800/60 text-sky-200';
-                    codeBadgeTheme = 'bg-sky-900/60 text-sky-300';
-                    workerTagTheme = 'bg-sky-900/40 text-sky-200';
-                  } else if (shift.code === 'M1' || shift.code === 'M2' || shift.code === 'M') {
-                    cardTheme = 'bg-amber-950/40 border-amber-800/60 text-amber-200';
-                    codeBadgeTheme = 'bg-amber-900/60 text-amber-300';
-                    workerTagTheme = 'bg-amber-900/40 text-amber-200';
-                  } else if (shift.code === 'H') {
-                    cardTheme = 'bg-emerald-950/40 border-emerald-800/60 text-emerald-200';
-                    codeBadgeTheme = 'bg-emerald-900/60 text-emerald-300';
-                    workerTagTheme = 'bg-emerald-900/40 text-emerald-200';
-                  } else if (shift.code === 'N') {
-                    cardTheme = 'bg-indigo-950/40 border-indigo-800/60 text-indigo-200';
-                    codeBadgeTheme = 'bg-indigo-900/60 text-indigo-300';
-                    workerTagTheme = 'bg-indigo-900/40 text-indigo-200';
-                  }
-
-                  // [핵심 2]: "현우"가 포함된 섹션 전체를 노란색(#fde047), 글씨 검은색, 볼드로 Override!
+                  // [요구사항 3]: "현우"가 포함된 섹션 전체를 노란색(#fde047), 글씨 검은색, 볼드 + 가운데 정렬!
                   if (hasHyunwoo) {
-                    cardTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-lg';
+                    cardTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-lg text-center';
                     codeBadgeTheme = 'bg-black text-[#fde047] font-black';
-                    workerTagTheme = 'bg-black/10 text-black font-extrabold border border-black/20';
+                    workerTagTheme = 'bg-black/15 text-black font-extrabold border border-black/20';
                   }
 
                   return (
@@ -1281,25 +1305,27 @@ export default function ERSchedulePage() {
                       key={idx}
                       className={`p-3 rounded-xl border text-xs transition-all ${cardTheme}`}
                     >
-                      <div className="flex items-center justify-between mb-1.5">
+                      {/* 상단 근무조 코드 및 시간 - 현우 포함 시 가운데 정렬 */}
+                      <div className={`flex items-center mb-1.5 ${hasHyunwoo ? 'justify-center gap-3' : 'justify-between'}`}>
                         <div className="flex items-center gap-1.5 font-bold">
                           <span className={`px-1.5 py-0.2 rounded text-2xs font-black ${codeBadgeTheme}`}>
                             {shift.code}
                           </span>
                           <span className="font-extrabold">{shift.name}</span>
                         </div>
-                        <span className={`text-2xs ${hasHyunwoo ? 'text-black/70 font-bold' : 'text-zinc-400'}`}>
+                        <span className={`text-2xs ${hasHyunwoo ? 'text-black/80 font-bold' : 'text-zinc-400'}`}>
                           {shift.time}
                         </span>
                       </div>
 
-                      <div className={`flex flex-wrap items-center gap-1.5 pt-1 border-t ${hasHyunwoo ? 'border-black/10' : 'border-zinc-800/60'}`}>
+                      {/* 근무자 태그 목록 - 현우 포함 시 justify-center 가운데 정렬 */}
+                      <div className={`flex flex-wrap items-center gap-1.5 pt-1.5 border-t ${hasHyunwoo ? 'border-black/15 justify-center' : 'border-zinc-800/60 justify-start'}`}>
                         {shift.workers.map((worker, wIdx) => {
                           const isMe = worker === '현우';
                           return (
                             <span
                               key={wIdx}
-                              className={`px-2 py-0.5 rounded text-xs font-semibold no-underline ${
+                              className={`px-2.5 py-0.5 rounded text-xs font-semibold no-underline ${
                                 isMe && hasHyunwoo
                                   ? 'bg-black text-yellow-400 font-black shadow-sm'
                                   : workerTagTheme
