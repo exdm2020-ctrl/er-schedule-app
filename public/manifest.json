@@ -1,0 +1,17 @@
+{
+  "name": "ER Schedule",
+  "short_name": "ER스케줄",
+  "description": "응급의학과 개인 스케줄 캘린더",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExMiIgZmlsbD0iIzA5MDkwYiIvPjxyZWN0IHg9IjIwOCIgeT0iMTA2IiB3aWR0aD0iOTYiIGhlaWdodD0iMzAwIiByeD0iMjAiIGZpbGw9IiNmYWNjMTUiLz48cmVjdCB4PSIxMDYiIHk9IjIwOCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSI5NiIgcng9IjIwIiBmaWxsPSIjZmFjYzE1Ii8+PC9zdmc+",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

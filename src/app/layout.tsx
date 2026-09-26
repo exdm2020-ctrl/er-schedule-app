@@ -1,17 +1,21 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
+const MEDICAL_CROSS_ICON =
+  "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExMiIgZmlsbD0iIzA5MDkwYiIvPjxyZWN0IHg9IjIwOCIgeT0iMTA2IiB3aWR0aD0iOTYiIGhlaWdodD0iMzAwIiByeD0iMjAiIGZpbGw9IiNmYWNjMTUiLz48cmVjdCB4PSIxMDYiIHk9IjIwOCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSI5NiIgcng9IjIwIiBmaWxsPSIjZmFjYzE1Ii8+PC9zdmc+";
+
 export const metadata: Metadata = {
-  title: "ER Schedule",
+  title: "🏥 ER Schedule",
   description: "응급의학과 개인 스케줄 캘린더",
+  manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "ER Schedule",
   },
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%2309090b'/><path d='M35 50h30M50 35v30' stroke='%23facc15' stroke-width='12' stroke-linecap='round'/></svg>",
-    apple: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2309090b'/><path d='M35 50h30M50 35v30' stroke='%23facc15' stroke-width='12' stroke-linecap='round'/></svg>",
+    icon: MEDICAL_CROSS_ICON,
+    apple: MEDICAL_CROSS_ICON,
   },
 };
 
@@ -32,14 +36,12 @@ export default function RootLayout({
   return (
     <html lang="ko" className="h-full dark">
       <head>
-        <link
-          rel="apple-touch-icon"
-          href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2309090b'/><path d='M35 50h30M50 35v30' stroke='%23facc15' stroke-width='12' stroke-linecap='round'/></svg>"
-        />
+        <link rel="icon" href={MEDICAL_CROSS_ICON} type="image/svg+xml" />
+        <link rel="apple-touch-icon" href={MEDICAL_CROSS_ICON} />
       </head>
       <body className="h-full antialiased bg-black text-zinc-50 flex justify-center selection:bg-yellow-400 selection:text-black">
-        {/* 모바일 화면 뷰포트 컨테이너 (최대 448px, 아이폰 최적화) */}
-        <div className="min-h-screen bg-zinc-950 text-zinc-50 flex flex-col w-full max-w-md mx-auto shadow-2xl relative">
+        {/* 모바일 화면 뷰포트 컨테이너 (최대 448px) */}
+        <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto shadow-2xl relative">
           {children}
         </div>
       </body>
