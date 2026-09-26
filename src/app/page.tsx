@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { 
   ChevronLeft, 
   ChevronRight, 
+  ChevronDown,
   Upload, 
   X, 
   Calendar as CalendarIcon, 
@@ -72,7 +73,7 @@ export interface ParsedDay {
   rawText: string;
 }
 
-export type ViewMode = '1month' | '3months' | '6months' | '1year';
+export type ViewMode = '1month' | '1year';
 
 // ==========================================
 // 2. 엑셀 파싱 핵심 알고리즘 (지정 규격 완벽 준수)
@@ -480,6 +481,12 @@ export default function ERSchedulePage() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // [요구사항 1]: 아이폰 네이티브 날짜 선택기(Date Picker) 상태
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [tempPickerYear, setTempPickerYear] = useState<number>(2026);
+  const [tempPickerMonth, setTempPickerMonth] = useState<number>(9);
+  const monthInputRef = useRef<HTMLInputElement>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // [핵심 1-1]: LocalStorage에서 스케줄 데이터 안전하게 불러오기
@@ -732,17 +739,17 @@ export default function ERSchedulePage() {
     return { total, dCount, mCount, nCount };
   }, [scheduleList, currentYear, currentMonth]);
 
-  // 월 이동
+  // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
+  const handleGoToCurrentMonth = () => {
+    const today = new Date();
+    setCurrentYear(today.getFullYear());
+    setCurrentMonth(today.getMonth() + 1);
+    setViewMode('1month');
+  };
+
+  // 월 / 연도 이동 (1M 모드일 땐 1달씩, 1Y 모드일 땐 1년씩)
   const handlePrevMonth = () => {
-    if (viewMode === '3months') {
-      const prev = new Date(currentYear, currentMonth - 1 - 3, 1);
-      setCurrentYear(prev.getFullYear());
-      setCurrentMonth(prev.getMonth() + 1);
-    } else if (viewMode === '6months') {
-      const prev = new Date(currentYear, currentMonth - 1 - 6, 1);
-      setCurrentYear(prev.getFullYear());
-      setCurrentMonth(prev.getMonth() + 1);
-    } else if (viewMode === '1year') {
+    if (viewMode === '1year') {
       setCurrentYear(prev => prev - 1);
     } else {
       const prev = new Date(currentYear, currentMonth - 1 - 1, 1);
@@ -752,15 +759,7 @@ export default function ERSchedulePage() {
   };
 
   const handleNextMonth = () => {
-    if (viewMode === '3months') {
-      const next = new Date(currentYear, currentMonth - 1 + 3, 1);
-      setCurrentYear(next.getFullYear());
-      setCurrentMonth(next.getMonth() + 1);
-    } else if (viewMode === '6months') {
-      const next = new Date(currentYear, currentMonth - 1 + 6, 1);
-      setCurrentYear(next.getFullYear());
-      setCurrentMonth(next.getMonth() + 1);
-    } else if (viewMode === '1year') {
+    if (viewMode === '1year') {
       setCurrentYear(next => next + 1);
     } else {
       const next = new Date(currentYear, currentMonth - 1 + 1, 1);
@@ -808,15 +807,17 @@ export default function ERSchedulePage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // 렌더링할 월 배열
+  // [요구사항 2]: 렌더링할 월 배열 (1M: 1달, 1Y: 선택된 연도의 1월~12월 전체를 아래로 스크롤하여 조회)
   const monthsToRender = useMemo(() => {
-    const count = viewMode === '1month' ? 1 : viewMode === '3months' ? 3 : viewMode === '6months' ? 6 : 12;
-    const arr: { year: number; month: number }[] = [];
-    for (let i = 0; i < count; i++) {
-      const d = new Date(currentYear, currentMonth - 1 + i, 1);
-      arr.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
+    if (viewMode === '1year') {
+      const arr: { year: number; month: number }[] = [];
+      for (let m = 1; m <= 12; m++) {
+        arr.push({ year: currentYear, month: m });
+      }
+      return arr;
     }
-    return arr;
+    // 1month 모드
+    return [{ year: currentYear, month: currentMonth }];
   }, [currentYear, currentMonth, viewMode]);
 
   // 로딩 중일 때
@@ -1063,18 +1064,18 @@ export default function ERSchedulePage() {
 
       <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto flex flex-col shadow-2xl relative select-none">
         {/* ========================================================= */}
-        {/* 1. 상단 심플 헤더: [ER Schedule] & [엑셀 업로드] (아이콘 완전 제거) */}
+        {/* 1. 상단 심플 헤더: [ER Schedule] 로고 폰트 확대 & 여백 확장 */}
         {/* ========================================================= */}
-        <header className="sticky top-0 z-30 pt-safe bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3 flex items-center justify-between">
-          <h1 className="text-base font-extrabold tracking-tight text-white">
+        <header className="sticky top-0 z-30 pt-safe bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-5 py-4 flex items-center justify-between">
+          <h1 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
             ER Schedule
           </h1>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {/* [요구사항 1]: 수동 저장 버튼 */}
             <button
               onClick={handleManualSave}
-              className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-all shadow-sm active:scale-95 ${
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition-all shadow-sm active:scale-95 ${
                 saveSuccess
                   ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
                   : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-700'
@@ -1083,12 +1084,12 @@ export default function ERSchedulePage() {
             >
               {saveSuccess ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <Check className="w-4 h-4 text-emerald-400" />
                   <span>저장됨</span>
                 </>
               ) : (
                 <>
-                  <Save className="w-3.5 h-3.5 text-yellow-400" />
+                  <Save className="w-4 h-4 text-yellow-400" />
                   <span>저장</span>
                 </>
               )}
@@ -1097,61 +1098,87 @@ export default function ERSchedulePage() {
             {/* 엑셀 업로드 버튼 */}
             <button
               onClick={() => setIsUploadOpen(true)}
-              className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-100 text-xs font-semibold px-3 py-1.5 rounded-lg border border-zinc-700 transition-all shadow-sm"
+              className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-100 text-xs font-bold px-3.5 py-2 rounded-xl border border-zinc-700 transition-all shadow-sm"
             >
-              <Upload className="w-3.5 h-3.5 text-yellow-400" />
+              <Upload className="w-4 h-4 text-yellow-400" />
               <span>엑셀 업로드</span>
             </button>
           </div>
         </header>
 
         {/* ========================================================= */}
-        {/* 2. 달력 컨트롤: 연/월 이동, 뷰어 필터(1M, 3M, 6M, 1Y) */}
+        {/* 2. 달력 컨트롤: [YYYY년 M월] 확대 및 클릭 시 네이티브 Date Picker 열기, [Now / 1M / 1Y] 탭 */}
         {/* ========================================================= */}
-        <div className="px-3 pt-3 pb-2 space-y-2 border-b border-zinc-900 bg-zinc-950">
+        <div className="px-4 pt-4 pb-3.5 space-y-3.5 border-b border-zinc-900 bg-zinc-950">
           <div className="flex items-center justify-between">
-            {/* 이전/다음 달 이동 */}
-            <div className="flex items-center gap-1">
+            {/* 이전/다음 달 이동 및 대형 [YYYY년 M월] 버튼 */}
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={handlePrevMonth}
-                aria-label="이전 달"
-                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors"
+                aria-label="이전"
+                className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors active:scale-95"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
 
-              <span className="text-sm font-black text-white tracking-tight px-1.5">
-                {currentYear}년 {currentMonth}월
-              </span>
+              {/* [요구사항 1]: 중앙의 "YYYY년 M월" 텍스트 크기를 키우고 굵게(font-bold, text-xl) + 탭하면 Date Picker 오픈 */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTempPickerYear(currentYear);
+                  setTempPickerMonth(currentMonth);
+                  setIsDatePickerOpen(true);
+                }}
+                className="text-xl font-bold text-white hover:text-yellow-400 active:scale-95 transition-all px-2 py-1 rounded-xl hover:bg-zinc-900 flex items-center gap-1 tracking-tight group cursor-pointer"
+                title="연도 및 월 선택 (Date Picker)"
+              >
+                <span>{currentYear}년 {currentMonth}월</span>
+                <ChevronDown className="w-4 h-4 text-zinc-400 group-hover:text-yellow-400 transition-colors" />
+              </button>
 
               <button
                 onClick={handleNextMonth}
-                aria-label="다음 달"
-                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors"
+                aria-label="다음"
+                className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors active:scale-95"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
 
-            {/* 타임프레임 필터 (1M, 3M, 6M, 1Y) */}
-            <div className="flex items-center bg-zinc-900 p-0.5 rounded-lg border border-zinc-800">
-              {(['1month', '3months', '6months', '1year'] as ViewMode[]).map(mode => {
-                const label = mode === '1month' ? '1M' : mode === '3months' ? '3M' : mode === '6months' ? '6M' : '1Y';
-                const isActive = viewMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    onClick={() => setViewMode(mode)}
-                    className={`text-[11px] font-bold px-2 py-1 rounded-md transition-all ${
-                      isActive
-                        ? 'bg-zinc-800 text-yellow-400 shadow-xs'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+            {/* [요구사항 2]: 타임프레임 필터 (Now / 1M / 1Y) */}
+            <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 shadow-inner">
+              <button
+                type="button"
+                onClick={handleGoToCurrentMonth}
+                className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-zinc-400 hover:text-yellow-400 active:scale-95 transition-all"
+                title="현재 실제 날짜의 이번 달로 즉시 이동"
+              >
+                Now
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('1month')}
+                className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95 ${
+                  viewMode === '1month'
+                    ? 'bg-zinc-800 text-yellow-400 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="1개월씩 달력 보기"
+              >
+                1M
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('1year')}
+                className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95 ${
+                  viewMode === '1year'
+                    ? 'bg-zinc-800 text-yellow-400 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="연간 전체 달력 스크롤 보기"
+              >
+                1Y
+              </button>
             </div>
           </div>
 
@@ -1168,7 +1195,7 @@ export default function ERSchedulePage() {
 
             <button
               onClick={() => setOnlyMyShifts(!onlyMyShifts)}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-bold text-2xs transition-all border ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-2xs transition-all border ${
                 onlyMyShifts
                   ? 'bg-yellow-400 text-black border-yellow-400 shadow-xs'
                   : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-800'
@@ -1181,9 +1208,9 @@ export default function ERSchedulePage() {
         </div>
 
         {/* ========================================================= */}
-        {/* 3. 달력 그리드 영역 (줄맞춤 강제 3-Row Slot 유지 & Override) */}
+        {/* 3. 달력 그리드 영역 (세로 여백을 충분히 확보하여 본문이 화면 중앙으로 안정감 있게 내려오도록 조정) */}
         {/* ========================================================= */}
-        <main className="flex-1 p-2 space-y-6 pb-safe">
+        <main className="flex-1 p-3 pt-6 space-y-8 pb-safe">
           {monthsToRender.map(({ year, month }) => {
             const ymStr = `${year}-${String(month).padStart(2, '0')}`;
             const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
@@ -1193,9 +1220,10 @@ export default function ERSchedulePage() {
               <div key={ymStr} className="space-y-1">
                 {/* 다중 월 모드일 때 월 헤더 */}
                 {viewMode !== '1month' && (
-                  <div className="flex items-center justify-between px-1 pt-2">
-                    <span className="text-xs font-black text-zinc-200">
-                      {year}년 {month}월
+                  <div className="flex items-center justify-between px-1 pt-3 pb-1 border-b border-zinc-900/80 mb-1">
+                    <span className="text-sm font-black text-yellow-400 flex items-center gap-1.5">
+                      <CalendarIcon className="w-3.5 h-3.5" />
+                      <span>{year}년 {month}월</span>
                     </span>
                     <span className="text-2xs text-zinc-500 font-medium">
                       {daysInMonth}일
@@ -1531,6 +1559,133 @@ export default function ERSchedulePage() {
               >
                 2026년 9~11월 샘플 데이터로 리셋
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* 6. 아이폰 네이티브 날짜 선택기 (iOS Bottom Sheet Wheel Date Picker) */}
+        {/* ========================================================= */}
+        {isDatePickerOpen && (
+          <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+            {/* 백드롭 클릭 시 닫기 */}
+            <div className="absolute inset-0" onClick={() => setIsDatePickerOpen(false)} />
+
+            {/* iOS 스타일 바텀 시트 */}
+            <div className="relative w-full max-w-md mx-auto bg-zinc-900 border-t border-zinc-800 rounded-t-3xl shadow-2xl p-5 pb-safe z-10 animate-in slide-in-from-bottom duration-250 text-zinc-100 select-none">
+              {/* 핸들 바 */}
+              <div className="w-10 h-1 bg-zinc-700/80 rounded-full mx-auto mb-3" />
+
+              {/* 상단 컨트롤 바 */}
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setIsDatePickerOpen(false)}
+                  className="text-sm font-semibold text-zinc-400 hover:text-zinc-200 px-2 py-1 transition-colors active:scale-95"
+                >
+                  취소
+                </button>
+                <div className="text-sm font-extrabold text-white tracking-tight flex items-center gap-1.5">
+                  <CalendarIcon className="w-4 h-4 text-yellow-400" />
+                  <span>날짜 선택</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCurrentYear(tempPickerYear);
+                    setCurrentMonth(tempPickerMonth);
+                    setIsDatePickerOpen(false);
+                  }}
+                  className="text-sm font-black text-yellow-400 hover:text-yellow-300 px-2 py-1 transition-colors active:scale-95"
+                >
+                  완료
+                </button>
+              </div>
+
+              {/* 아이폰 네이티브 감성 듀얼 휠(Wheel) 피커 */}
+              <div className="relative my-4 h-48 flex items-center justify-center overflow-hidden bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
+                {/* 중앙 하이라이트 밴드 (iOS 휠 선택 표시선) */}
+                <div className="absolute left-2 right-2 h-11 border-y border-yellow-400/30 bg-yellow-400/5 rounded-xl pointer-events-none z-0" />
+
+                {/* 좌측: 연도 휠 컬럼 */}
+                <div className="flex-1 h-full overflow-y-auto py-18 text-center scroll-smooth z-10 space-y-1">
+                  {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => {
+                    const isSelected = tempPickerYear === y;
+                    return (
+                      <div
+                        key={y}
+                        onClick={() => setTempPickerYear(y)}
+                        className={`h-9 flex items-center justify-center cursor-pointer transition-all duration-150 ${
+                          isSelected
+                            ? 'text-yellow-400 font-black text-lg scale-110 drop-shadow-sm'
+                            : 'text-zinc-500 hover:text-zinc-300 text-sm font-medium'
+                        }`}
+                      >
+                        {y}년
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="w-px h-32 bg-zinc-800/80" />
+
+                {/* 우측: 월 휠 컬럼 */}
+                <div className="flex-1 h-full overflow-y-auto py-18 text-center scroll-smooth z-10 space-y-1">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => {
+                    const isSelected = tempPickerMonth === m;
+                    return (
+                      <div
+                        key={m}
+                        onClick={() => setTempPickerMonth(m)}
+                        className={`h-9 flex items-center justify-center cursor-pointer transition-all duration-150 ${
+                          isSelected
+                            ? 'text-yellow-400 font-black text-lg scale-110 drop-shadow-sm'
+                            : 'text-zinc-500 hover:text-zinc-300 text-sm font-medium'
+                        }`}
+                      >
+                        {m}월
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 하단 퀵 액션 버튼 & 네이티브 인풋 연동 */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    setTempPickerYear(now.getFullYear());
+                    setTempPickerMonth(now.getMonth() + 1);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 text-xs font-bold text-zinc-300 transition-all flex items-center justify-center gap-1"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
+                  <span>이번 달로 맞추기</span>
+                </button>
+
+                {/* 네이티브 <input type="month"> 연동 버튼 */}
+                <label className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 text-xs font-bold text-zinc-300 transition-all flex items-center justify-center gap-1 cursor-pointer relative overflow-hidden">
+                  <CalendarIcon className="w-3.5 h-3.5 text-sky-400" />
+                  <span>기기 달력으로 선택</span>
+                  <input
+                    type="month"
+                    ref={monthInputRef}
+                    value={`${tempPickerYear}-${String(tempPickerMonth).padStart(2, '0')}`}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        const [y, m] = e.target.value.split('-').map(Number);
+                        if (y && m) {
+                          setTempPickerYear(y);
+                          setTempPickerMonth(m);
+                        }
+                      }
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                </label>
+              </div>
             </div>
           </div>
         )}
