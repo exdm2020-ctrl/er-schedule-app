@@ -77,13 +77,16 @@ interface ParsedDay {
 type ViewMode = '1month' | '1year';
 
 // ==========================================
-// [날짜 표준화 헬퍼]: 무조건 로컬 기준의 명확한 YYYY-MM-DD (예: 2026-09-01) 포맷 보장
+// [날짜 표준화 헬퍼]: Date 객체 타임존 오차 없이 순수 정수 기반 YYYY-MM-DD 포맷 보장
 // ==========================================
 function normalizeDateKey(year: number | string, month: number | string, day: number | string): string {
-  const y = String(year).trim();
-  const m = String(month).trim().padStart(2, '0');
-  const d = String(day).trim().padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  const y = parseInt(String(year).trim(), 10);
+  const m = parseInt(String(month).trim(), 10);
+  const d = parseInt(String(day).trim(), 10);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) {
+    return `${year}-${month}-${day}`;
+  }
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
 // ==========================================
@@ -261,167 +264,99 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
 
             // [근무자 줄바꿈(\n) 분리 규칙 적용]
             const shiftCellVal = String(shiftRow[col] || '').trim();
-            const lines = shiftCellVal.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            // 빈 줄("")이나 공백만 있는 줄 완벽 필터링
+            const lines = shiftCellVal
+              .split(/\r?\n/)
+              .map(l => l.trim())
+              .filter(Boolean)
+              .filter(l => l.replace(/[\s\-_=]/g, '').length > 0);
 
             const shifts: ShiftItem[] = [];
 
-            // "현우" 이름 정리 함수 (박현우 -> 현우)
+            // "현우" 이름 정리 함수 (박현우 -> 현우) 및 다수 근무자 분리
             const cleanWorkers = (lineStr: string) => {
-              return lineStr
-                .split(/[\/,]/)
+              if (!lineStr) return [];
+              const stripped = lineStr.replace(/^(D|DAY|M|MID|M1|M2|H|HELPER|N|NIGHT|데이|미드|헬퍼|나이트)\s*[:\-\s]\s*/i, '');
+              return stripped
+                .split(/[\/,\s+&|]+/)
                 .map(w => w.trim())
                 .filter(Boolean)
                 .map(w => (w === '박현우' ? '현우' : w));
             };
 
-            if (isWeekendOrHol) {
-              // * 주말/공휴일 무조건 3줄: [0]=D, [1]=M/H, [2]=N
+            // [핵심 해결 2]: 평일/공휴일 구분 없이, 오직 셀 내부의 '줄 바꿈(\n)' 갯수(lines.length) 기준으로 근무조 배정!
+            if (lines.length >= 3) {
+              // 유효 데이터가 3줄 이상인 경우: [0]을 D, [1]을 M, [2]를 N에 배정
               if (lines[0]) {
                 const workers = cleanWorkers(lines[0]);
-                shifts.push({
-                  code: 'D',
-                  name: '주말 데이',
-                  time: '08:00 - 16:00',
-                  workers,
-                  hasTargetUser: workers.some(w => w.includes('현우')),
-                });
-              }
-              if (lines[1]) {
-                const lineWorkers = cleanWorkers(lines[1]);
-                if (lineWorkers.length >= 2) {
-                  const helperWorker = [lineWorkers[0]];
-                  const midWorker = lineWorkers.slice(1);
-                  shifts.push({
-                    code: 'H',
-                    name: '주말 헬퍼',
-                    time: '14:00 - 23:00',
-                    workers: helperWorker,
-                    hasTargetUser: helperWorker.some(w => w.includes('현우')),
-                  });
-                  shifts.push({
-                    code: 'M',
-                    name: '주말 미드',
-                    time: '15:00 - 24:00',
-                    workers: midWorker,
-                    hasTargetUser: midWorker.some(w => w.includes('현우')),
-                  });
-                } else {
-                  shifts.push({
-                    code: 'H',
-                    name: '주말 헬퍼/미드',
-                    time: '14:00 - 24:00',
-                    workers: lineWorkers,
-                    hasTargetUser: lineWorkers.some(w => w.includes('현우')),
-                  });
-                }
-              }
-              if (lines[2]) {
-                const workers = cleanWorkers(lines[2]);
-                shifts.push({
-                  code: 'N',
-                  name: '주말 나이트',
-                  time: '00:00 - 익일 08:00',
-                  workers,
-                  hasTargetUser: workers.some(w => w.includes('현우')),
-                });
-              }
-            } else {
-              // * 평일(월~금)
-              if (lines.length >= 3) {
-                if (lines[0]) {
-                  const workers = cleanWorkers(lines[0]);
+                if (workers.length > 0) {
                   shifts.push({
                     code: 'D',
-                    name: '평일 데이',
+                    name: '데이',
                     time: '08:00 - 15:00',
                     workers,
                     hasTargetUser: workers.some(w => w.includes('현우')),
                   });
                 }
-                if (lines[1]) {
-                  const midWorkers = cleanWorkers(lines[1]);
-                  if (midWorkers.length >= 2) {
-                    const m1 = [midWorkers[0]];
-                    const m2 = midWorkers.slice(1);
-                    shifts.push({
-                      code: 'M1',
-                      name: '평일 미드1',
-                      time: '14:00 - 24:00',
-                      workers: m1,
-                      hasTargetUser: m1.some(w => w.includes('현우')),
-                    });
-                    shifts.push({
-                      code: 'M2',
-                      name: '평일 미드2',
-                      time: '14:00 - 24:00',
-                      workers: m2,
-                      hasTargetUser: m2.some(w => w.includes('현우')),
-                    });
-                  } else {
-                    shifts.push({
-                      code: 'M1',
-                      name: '평일 미드',
-                      time: '14:00 - 24:00',
-                      workers: midWorkers,
-                      hasTargetUser: midWorkers.some(w => w.includes('현우')),
-                    });
-                  }
-                }
-                if (lines[2]) {
-                  const workers = cleanWorkers(lines[2]);
+              }
+              if (lines[1]) {
+                const workers = cleanWorkers(lines[1]);
+                if (workers.length > 0) {
                   shifts.push({
-                    code: 'N',
-                    name: '평일 나이트',
-                    time: '00:00 - 익일 07:30',
+                    code: 'M',
+                    name: '미드',
+                    time: '14:00 - 24:00',
                     workers,
                     hasTargetUser: workers.some(w => w.includes('현우')),
                   });
                 }
-              } else if (lines.length === 2) {
-                if (lines[0]) {
-                  const midWorkers = cleanWorkers(lines[0]);
-                  if (midWorkers.length >= 2) {
-                    const m1 = [midWorkers[0]];
-                    const m2 = midWorkers.slice(1);
-                    shifts.push({
-                      code: 'M1',
-                      name: '평일 미드1',
-                      time: '14:00 - 24:00',
-                      workers: m1,
-                      hasTargetUser: m1.some(w => w.includes('현우')),
-                    });
-                    shifts.push({
-                      code: 'M2',
-                      name: '평일 미드2',
-                      time: '14:00 - 24:00',
-                      workers: m2,
-                      hasTargetUser: m2.some(w => w.includes('현우')),
-                    });
-                  } else {
-                    shifts.push({
-                      code: 'M1',
-                      name: '평일 미드',
-                      time: '14:00 - 24:00',
-                      workers: midWorkers,
-                      hasTargetUser: midWorkers.some(w => w.includes('현우')),
-                    });
-                  }
-                }
-                if (lines[1]) {
-                  const workers = cleanWorkers(lines[1]);
+              }
+              if (lines[2]) {
+                const workers = cleanWorkers(lines[2]);
+                if (workers.length > 0) {
                   shifts.push({
                     code: 'N',
-                    name: '평일 나이트',
-                    time: '00:00 - 익일 07:30',
+                    name: '나이트',
+                    time: '00:00 - 익일 08:00',
                     workers,
                     hasTargetUser: workers.some(w => w.includes('현우')),
                   });
                 }
-              } else if (lines.length === 1) {
+              }
+            } else if (lines.length === 2) {
+              // [핵심]: 유효 데이터가 2줄인 경우 (평일/공휴일 무관):
+              // D 근무는 없는 날입니다! [0]을 M 위치에, [1]을 N 위치에 배정하고 D는 무조건 투명 빈칸으로 둡니다.
+              if (lines[0]) {
                 const workers = cleanWorkers(lines[0]);
+                if (workers.length > 0) {
+                  shifts.push({
+                    code: 'M',
+                    name: '미드',
+                    time: '14:00 - 24:00',
+                    workers,
+                    hasTargetUser: workers.some(w => w.includes('현우')),
+                  });
+                }
+              }
+              if (lines[1]) {
+                const workers = cleanWorkers(lines[1]);
+                if (workers.length > 0) {
+                  shifts.push({
+                    code: 'N',
+                    name: '나이트',
+                    time: '00:00 - 익일 08:00',
+                    workers,
+                    hasTargetUser: workers.some(w => w.includes('현우')),
+                  });
+                }
+              }
+            } else if (lines.length === 1) {
+              // 유효 데이터가 1줄인 경우: M 위치에 배정
+              const workers = cleanWorkers(lines[0]);
+              if (workers.length > 0) {
                 shifts.push({
-                  code: 'M1',
-                  name: '평일 근무',
+                  code: 'M',
+                  name: '미드',
                   time: '14:00 - 24:00',
                   workers,
                   hasTargetUser: workers.some(w => w.includes('현우')),
