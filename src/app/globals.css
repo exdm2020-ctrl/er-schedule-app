@@ -2,14 +2,8 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
-    --primary: 221 83% 53%;
-    --primary-foreground: 210 40% 98%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --border: 214 32% 91%;
-    --ring: 221 83% 53%;
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
   }
 
   * {
@@ -23,8 +17,8 @@
   }
 
   body {
-    background-color: #f1f5f9;
-    color: #0f172a;
+    background-color: #09090b; /* zinc-950 */
+    color: #fafafa; /* zinc-50 */
     font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;
@@ -48,26 +42,13 @@
   scrollbar-width: none;
 }
 
-/* Glassmorphism */
-.glass-header {
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-
-.glass-card {
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
 /* Pulse animation for target user */
 @keyframes target-glow {
   0%, 100% {
-    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.4), 0 2px 8px -1px rgba(245, 158, 11, 0.3);
+    box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.4), 0 2px 8px -1px rgba(250, 204, 21, 0.3);
   }
   50% {
-    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.8), 0 4px 14px 0px rgba(245, 158, 11, 0.4);
+    box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.8), 0 4px 14px 0px rgba(250, 204, 21, 0.4);
   }
 }
 
