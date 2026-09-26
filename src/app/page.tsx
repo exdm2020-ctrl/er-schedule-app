@@ -27,6 +27,7 @@ const STORAGE_DATA_KEY = 'er_schedule_data_v2';
 const STORAGE_AUTH_KEY = 'er_schedule_auth_token_v2';
 const STORAGE_PIN_KEY = 'er_schedule_custom_pin_v2';
 const STORAGE_WEBAUTHN_ID = 'er_schedule_webauthn_cred_id';
+const STORAGE_WEBAUTHN_REGISTERED = 'er_schedule_webauthn_registered_v3';
 const DEFAULT_PASSCODE = process.env.NEXT_PUBLIC_APP_PASSWORD || '1234';
 
 // WebAuthn 버퍼 변환 유틸
@@ -487,6 +488,9 @@ export default function ERSchedulePage() {
   const [tempPickerMonth, setTempPickerMonth] = useState<number>(9);
   const monthInputRef = useRef<HTMLInputElement>(null);
 
+  // [요구사항 1]: 기기에 등록된 Face ID 패스키 존재 여부 상태
+  const [hasRegisteredPasskey, setHasRegisteredPasskey] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // [핵심 1-1]: LocalStorage에서 스케줄 데이터 안전하게 불러오기
@@ -510,20 +514,26 @@ export default function ERSchedulePage() {
     return false;
   };
 
-  // [핵심 1-2]: 앱 시작 시 무조건 잠금화면(false) 강제 & LocalStorage 데이터 자동 로드 & Face ID 자동 실행
+  // [핵심 1-2 & 요구사항 1 - 단계 B]: 앱 시작 시 잠금화면 강제 & 패스키 기록이 있을 때만 Face ID(Get) 자동 호출
   useEffect(() => {
     setIsUnlocked(false);
     loadSavedSchedule();
 
-    // [요구사항 1]: 기기에 이미 등록된 Passkey(Face ID) 정보가 존재한다면 즉시 Face ID 자동 실행 (Auto-trigger)
-    const existingCredId = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_WEBAUTHN_ID) : null;
-    if (existingCredId) {
-      const timer = setTimeout(() => {
-        handleFaceID(true).catch(err => {
-          console.warn('Face ID 자동 실행 에러 (보안 정책 등으로 차단된 경우 수동 터치 가능):', err);
-        });
-      }, 150);
-      return () => clearTimeout(timer);
+    if (typeof window !== 'undefined') {
+      const isReg = localStorage.getItem(STORAGE_WEBAUTHN_REGISTERED) === 'true';
+      const existingCredId = localStorage.getItem(STORAGE_WEBAUTHN_ID);
+      const isActuallyRegistered = Boolean(isReg && existingCredId);
+      setHasRegisteredPasskey(isActuallyRegistered);
+
+      // 등록된 패스키 기록이 있을 때만 get() 자동 실행! 기록이 없다면 조용히 PIN 화면 유지 ("일치하는 패스키 없음" 에러 원천 차단)
+      if (isActuallyRegistered) {
+        const timer = setTimeout(() => {
+          handleAuthFaceID(true).catch(err => {
+            console.warn('Face ID 자동 실행 에러 (보안 정책 등으로 차단된 경우 수동 터치 가능):', err);
+          });
+        }, 150);
+        return () => clearTimeout(timer);
+      }
     }
   }, []);
 
@@ -541,63 +551,14 @@ export default function ERSchedulePage() {
     }
   };
 
-  // [요구사항 1]: 실제 기기 Face ID (WebAuthn / Passkey) 표준 연동 및 자동 실행 지원
-  const handleFaceID = async (isAuto = false) => {
+  // [요구사항 1 - 단계 A]: Face ID (패스키) 신규 기기 등록 (Create)
+  const handleRegisterFaceID = async () => {
     if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
-      if (!isAuto) {
-        alert('현재 브라우저/기기 환경에서 Face ID(WebAuthn)를 지원하지 않습니다. 암호(PIN)를 입력해 주세요.');
-      }
+      alert('현재 브라우저/기기 환경에서 Face ID(WebAuthn)를 지원하지 않습니다.');
       return;
     }
 
     try {
-      const existingCredId = localStorage.getItem(STORAGE_WEBAUTHN_ID);
-
-      // 1. 이미 Face ID 패스키가 등록된 경우: navigator.credentials.get() 호출 -> 실제 Face ID 스캔 팝업
-      if (existingCredId) {
-        try {
-          const challenge = new Uint8Array(32);
-          window.crypto.getRandomValues(challenge);
-
-          const assertion = await navigator.credentials.get({
-            publicKey: {
-              challenge,
-              timeout: 60000,
-              rpId: window.location.hostname,
-              allowCredentials: [
-                {
-                  id: base64ToBuffer(existingCredId),
-                  type: 'public-key',
-                  transports: ['internal'],
-                },
-              ],
-              userVerification: 'required',
-            },
-          });
-
-          if (assertion) {
-            loadSavedSchedule();
-            setIsUnlocked(true);
-            return;
-          }
-        } catch (getErr: any) {
-          console.warn('Face ID get() 인증 실패 또는 취소:', getErr);
-          if (isAuto) {
-            // 자동 실행 실패 시 조용히 넘어가서 사용자가 수동으로 아이콘을 누르거나 PIN을 칠 수 있게 함
-            return;
-          }
-          if (getErr.name === 'NotAllowedError') {
-            // 사용자가 생체 인증 화면을 취소한 경우 리턴
-            return;
-          }
-          // 기기에서 패스키를 찾을 수 없거나 다른 기기일 경우 아래 create()로 재등록 시도
-        }
-      } else if (isAuto) {
-        // 자동 실행일 때 패스키가 아직 없으면 create()를 자동으로 띄우지 않고 사용자가 준비되었을 때 수동으로 누르게 함
-        return;
-      }
-
-      // 2. 최초 사용 시 또는 재등록: navigator.credentials.create() 호출 -> 실제 아이폰 Face ID 등록 팝업
       const challenge = new Uint8Array(32);
       window.crypto.getRandomValues(challenge);
 
@@ -629,17 +590,92 @@ export default function ERSchedulePage() {
       if (credential) {
         const rawIdBase64 = bufferToBase64(credential.rawId);
         localStorage.setItem(STORAGE_WEBAUTHN_ID, rawIdBase64);
+        localStorage.setItem(STORAGE_WEBAUTHN_REGISTERED, 'true');
+        setHasRegisteredPasskey(true);
+        alert('Face ID(패스키)가 기기에 안전하게 등록되었습니다!\n이제부터 앱 접속 시 Face ID로 자동 잠금 해제됩니다.');
         loadSavedSchedule();
         setIsUnlocked(true);
       }
     } catch (err: any) {
-      console.error('Face ID WebAuthn 오류:', err);
-      if (isAuto) return;
+      console.error('Face ID 등록 오류:', err);
       if (err.name === 'NotAllowedError') {
-        // 사용자가 취소한 경우 조용히 리턴
+        // 사용자가 취소한 경우 조용히 종료
         return;
       }
-      alert('Face ID 연동 중 오류가 발생했습니다. PIN 암호를 입력해 주세요. (HTTPS 환경 필요)');
+      alert('Face ID 등록 중 오류가 발생했습니다. (HTTPS 환경 및 Safari 권한 확인 필요)');
+    }
+  };
+
+  // [요구사항 1 - 단계 B]: Face ID (패스키) 생체 인증 (Get)
+  const handleAuthFaceID = async (isAuto = false) => {
+    if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
+      if (!isAuto) {
+        alert('현재 브라우저/기기 환경에서 Face ID(WebAuthn)를 지원하지 않습니다. 암호(PIN)를 입력해 주세요.');
+      }
+      return;
+    }
+
+    const isReg = localStorage.getItem(STORAGE_WEBAUTHN_REGISTERED) === 'true';
+    const existingCredId = localStorage.getItem(STORAGE_WEBAUTHN_ID);
+
+    // [핵심]: 패스키가 등록되어 있지 않은 상태 처리
+    if (!isReg || !existingCredId) {
+      if (isAuto) {
+        // 자동 실행일 때는 조용히 PIN 키패드 화면을 유지
+        return;
+      }
+      // 사용자가 버튼을 직접 눌렀을 때는 등록으로 친절히 안내
+      const confirmRegister = confirm('현재 기기에 등록된 Face ID 패스키가 없습니다.\n지금 Face ID 기기 등록을 진행하시겠습니까?');
+      if (confirmRegister) {
+        handleRegisterFaceID();
+      }
+      return;
+    }
+
+    try {
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          timeout: 60000,
+          rpId: window.location.hostname,
+          allowCredentials: [
+            {
+              id: base64ToBuffer(existingCredId),
+              type: 'public-key',
+              transports: ['internal'],
+            },
+          ],
+          userVerification: 'required',
+        },
+      });
+
+      if (assertion) {
+        loadSavedSchedule();
+        setIsUnlocked(true);
+        return;
+      }
+    } catch (err: any) {
+      console.warn('Face ID get() 인증 실패 또는 불일치:', err);
+
+      // [핵심 에러 해결]: "일치하는 패스키가 없습니다" (NotFoundError 등) 발생 시 잘못된 로컬 키를 자동 제거하여 다음 실행 시 에러 방지
+      if (err.name === 'NotFoundError' || (err.message && err.message.toLowerCase().includes('match'))) {
+        localStorage.removeItem(STORAGE_WEBAUTHN_ID);
+        localStorage.removeItem(STORAGE_WEBAUTHN_REGISTERED);
+        setHasRegisteredPasskey(false);
+      }
+
+      if (isAuto) {
+        // 자동 실행 실패 시 조용히 넘어가서 PIN 입력 대기
+        return;
+      }
+      if (err.name === 'NotAllowedError') {
+        // 사용자가 취소한 경우 리턴
+        return;
+      }
+      alert('Face ID 인증에 실패했습니다. 암호(PIN)로 잠금을 해제하거나 하단에서 [Face ID 기기 등록]을 다시 진행해 주세요.');
     }
   };
 
@@ -861,7 +897,7 @@ export default function ERSchedulePage() {
           {/* Face ID 인터랙션 버튼 */}
           <button
             type="button"
-            onClick={() => handleFaceID(false)}
+            onClick={() => handleAuthFaceID(false)}
             className="w-20 h-20 rounded-3xl bg-zinc-900 border border-zinc-800 hover:border-yellow-400/80 active:scale-95 transition-all flex flex-col items-center justify-center text-yellow-400 mb-8 shadow-xl group cursor-pointer"
             title="Face ID"
           >
@@ -910,7 +946,7 @@ export default function ERSchedulePage() {
               0
             </button>
             <button
-              onClick={() => handleFaceID(false)}
+              onClick={() => handleAuthFaceID(false)}
               className="w-16 h-16 rounded-full text-yellow-400 hover:text-yellow-300 font-bold text-xs mx-auto flex items-center justify-center"
             >
               Face ID
@@ -918,23 +954,41 @@ export default function ERSchedulePage() {
           </div>
         </div>
 
-        {/* 하단 비밀번호 변경 및 안내 */}
+        {/* [요구사항 1 - 단계 A]: 하단 Face ID 기기 등록 & 비밀번호 변경 버튼 */}
         <div className="pb-safe flex flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setIsPinModalOpen(true);
-              setPinChangeError(null);
-              setPinChangeSuccess(null);
-              setCurrentPinInput('');
-              setNewPinInput('');
-              setConfirmPinInput('');
-            }}
-            className="text-2xs text-zinc-400 hover:text-yellow-400 transition-colors font-medium py-1.5 px-3.5 bg-zinc-900/80 hover:bg-zinc-800 rounded-full border border-zinc-800 flex items-center gap-1.5 active:scale-95 shadow-xs"
-          >
-            <KeyRound className="w-3 h-3 text-yellow-400" />
-            <span>비밀번호 변경</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRegisterFaceID}
+              className="text-2xs text-yellow-400 hover:text-yellow-300 transition-all font-bold py-2 px-3 bg-zinc-900 hover:bg-zinc-800 rounded-full border border-yellow-400/40 hover:border-yellow-400 flex items-center gap-1.5 active:scale-95 shadow-sm"
+              title="이 기기에 Face ID 패스키 등록"
+            >
+              <ScanFace className="w-3.5 h-3.5 text-yellow-400" />
+              <span>{hasRegisteredPasskey ? 'Face ID 재등록' : 'Face ID(패스키) 기기 등록'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsPinModalOpen(true);
+                setPinChangeError(null);
+                setPinChangeSuccess(null);
+                setCurrentPinInput('');
+                setNewPinInput('');
+                setConfirmPinInput('');
+              }}
+              className="text-2xs text-zinc-400 hover:text-zinc-200 transition-all font-medium py-2 px-3 bg-zinc-900/80 hover:bg-zinc-800 rounded-full border border-zinc-800 flex items-center gap-1.5 active:scale-95 shadow-xs"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-zinc-400" />
+              <span>비밀번호 변경</span>
+            </button>
+          </div>
+
+          {hasRegisteredPasskey && (
+            <span className="text-[10px] text-zinc-500 font-medium">
+              ✓ Face ID 등록 기기 (앱 진입 시 자동 잠금해제)
+            </span>
+          )}
         </div>
 
         {/* 비밀번호 변경 팝업 모달 */}
