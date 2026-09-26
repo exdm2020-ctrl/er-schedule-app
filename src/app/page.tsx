@@ -103,16 +103,42 @@ function extractDateInfo(
   defaultMonth: number
 ): ExtractedDate | null {
   if (rawVal === null || rawVal === undefined) return null;
+
+  // 1) 자바스크립트 Date 객체 직접 처리 (xlsx 라이브러리/브라우저가 Date 객체로 변환한 경우)
+  if (rawVal instanceof Date || Object.prototype.toString.call(rawVal) === '[object Date]') {
+    const dObj = rawVal as Date;
+    if (!isNaN(dObj.getTime())) {
+      // Local 시간과 UTC 시간 둘 다 확인 (타임존 시차 극복)
+      const localY = dObj.getFullYear();
+      const localM = dObj.getMonth() + 1;
+      const localD = dObj.getDate();
+
+      const utcY = dObj.getUTCFullYear();
+      const utcM = dObj.getUTCMonth() + 1;
+      const utcD = dObj.getUTCDate();
+
+      // 한국 표준시(UTC+9)로 인해 UTC는 8월 31일 15:00, Local은 9월 1일 00:00일 수 있음!
+      // defaultMonth와 일치하거나 day === 1인 쪽을 최우선 선택
+      if (localD === 1 || localM === defaultMonth) {
+        return { year: localY, month: localM, day: localD, holidayNote: null };
+      }
+      if (utcD === 1 || utcM === defaultMonth) {
+        return { year: utcY, month: utcM, day: utcD, holidayNote: null };
+      }
+      return { year: localY, month: localM, day: localD, holidayNote: null };
+    }
+  }
+
   const str = String(rawVal).trim();
   if (!str) return null;
 
-  // 공휴일 메모 (예: "1(신정)", "2026-09-01(신정)", "25(추석)")
+  // 공휴일 메모 또는 괄호 요일 (예: "1(신정)", "2026-09-01(신정)", "25(추석)", "1일 (화)")
   const memoMatch = str.match(/\((.*?)\)/);
   const holidayNote = memoMatch ? memoMatch[1].trim() : null;
   // 괄호 메모 제외한 순수 날짜 문자열
   const pureStr = str.replace(/\(.*?\)/g, '').trim();
 
-  // 1) 전체 날짜 포맷 (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD, YYYY년 M월 D일)
+  // 2) 전체 날짜 포맷 (YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD, YYYY년 M월 D일, 2026-9-1)
   const fullYmdMatch = pureStr.match(/(\d{4})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
   if (fullYmdMatch) {
     const y = parseInt(fullYmdMatch[1], 10);
@@ -123,22 +149,55 @@ function extractDateInfo(
     }
   }
 
-  // 2) 엑셀 날짜 일련번호 (40000 ~ 60000) 순수 UTC 일수 산술 변환
-  const numVal = typeof rawVal === 'number' ? rawVal : parseFloat(pureStr);
-  if (!isNaN(numVal) && numVal >= 40000 && numVal <= 60000 && /^\d{5}(\.\d+)?$/.test(pureStr)) {
-    const serialDays = Math.floor(numVal);
-    const epochUtc = (serialDays - 25569) * 86400 * 1000;
-    const utcDate = new Date(epochUtc);
-    const y = utcDate.getUTCFullYear();
-    const m = utcDate.getUTCMonth() + 1;
-    const d = utcDate.getUTCDate();
+  // 3) 8자리 연속 숫자 (예: '20260901', '20261001')
+  const ymd8Match = pureStr.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (ymd8Match) {
+    const y = parseInt(ymd8Match[1], 10);
+    const m = parseInt(ymd8Match[2], 10);
+    const d = parseInt(ymd8Match[3], 10);
     if (y >= 2020 && y <= 2035 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
       return { year: y, month: m, day: d, holidayNote };
     }
   }
 
-  // 3) "M/D" 또는 "M.D" (예: "9/1", "9.1", "9/22", "10/1")
-  const mdMatch = pureStr.match(/^(\d{1,2})[\/.](\d{1,2})일?$/);
+  // 4) 미국식 날짜 (MM/DD/YYYY 또는 MM-DD-YYYY, 예: '09/01/2026')
+  const mdyMatch = pureStr.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4})$/);
+  if (mdyMatch) {
+    const m = parseInt(mdyMatch[1], 10);
+    const d = parseInt(mdyMatch[2], 10);
+    const y = parseInt(mdyMatch[3], 10);
+    if (y >= 2020 && y <= 2035 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return { year: y, month: m, day: d, holidayNote };
+    }
+  }
+
+  // 5) 엑셀 날짜 일련번호 (40000 ~ 60000, 2009년~2064년)
+  const numVal = typeof rawVal === 'number' ? rawVal : parseFloat(pureStr);
+  if (!isNaN(numVal) && numVal >= 40000 && numVal <= 60000 && /^\d{5}(\.\d+)?$/.test(pureStr)) {
+    const serialDays = Math.floor(numVal);
+    const epochUtc = (serialDays - 25569) * 86400 * 1000;
+    const dateUtc = new Date(epochUtc);
+    const utcY = dateUtc.getUTCFullYear();
+    const utcM = dateUtc.getUTCMonth() + 1;
+    const utcD = dateUtc.getUTCDate();
+
+    // 혹시 모를 한국시간(+9시간) 보정치
+    const dateKst = new Date(epochUtc + 9 * 3600 * 1000);
+    const kstY = dateKst.getUTCFullYear();
+    const kstM = dateKst.getUTCMonth() + 1;
+    const kstD = dateKst.getUTCDate();
+
+    if (kstD === 1 || kstM === defaultMonth) {
+      return { year: kstY, month: kstM, day: kstD, holidayNote };
+    }
+    if (utcD === 1 || utcM === defaultMonth) {
+      return { year: utcY, month: utcM, day: utcD, holidayNote };
+    }
+    return { year: utcY, month: utcM, day: utcD, holidayNote };
+  }
+
+  // 6) 'M월 D일' 또는 'M/D' 또는 'M.D' 또는 'M-D' (예: '9월 1일', '9/1', '9.1', '10/1')
+  const mdMatch = pureStr.match(/^(\d{1,2})[.\-\/월\s]+(\d{1,2})일?$/);
   if (mdMatch) {
     const m = parseInt(mdMatch[1], 10);
     const d = parseInt(mdMatch[2], 10);
@@ -147,7 +206,7 @@ function extractDateInfo(
     }
   }
 
-  // 4) 단순 일자 (예: "1", "01", "1일", "22", "23일", "31")
+  // 7) 단순 일자 (예: '1', '01', '1일', '22', '23일', '31')
   const dMatch = pureStr.match(/^(\d{1,2})\s*일?$/);
   if (dMatch) {
     const d = parseInt(dMatch[1], 10);
@@ -251,15 +310,6 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
         while (nextR < rawRows.length) {
           const candidateRow = rawRows[nextR] || [];
 
-          // 새로운 월 헤더(예: "2026년 10월", "10월")가 나타나면 현재 월 블록 종료 (단, 2026-09-01 같은 날짜 셀 제외)
-          const isNextMonthTitle = candidateRow.some(cell => {
-            const cs = String(cell || '').trim();
-            if (!cs) return false;
-            if (cs.match(/\d{4}[.\-\/년\s]+\d{1,2}[.\-\/월\s]+\d{1,2}/)) return false;
-            return Boolean(cs.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || cs.match(/^(\d{1,2})월$/));
-          });
-          if (isNextMonthTitle) break;
-
           // 또 다른 요일 행이 나타나면 건너뜀
           const isAnotherDayOfWeek = candidateRow.some(c => String(c).trim() === '일') && candidateRow.some(c => String(c).trim() === '월');
           if (isAnotherDayOfWeek) {
@@ -267,7 +317,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
             continue;
           }
 
-          // 현재 행(candidateRow)에서 유효한 날짜가 있는지 검사
+          // 현재 행(candidateRow)에서 유효한 날짜가 있는지 먼저 검사!
           const validDatesInRow: { col: number; dateInfo: ExtractedDate }[] = [];
           for (const col of targetCols) {
             const cellVal = candidateRow[col];
@@ -275,6 +325,17 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
             if (info) {
               validDatesInRow.push({ col, dateInfo: info });
             }
+          }
+
+          // [월 헤더 검사 안전화]: 유효 날짜가 전혀 없는 행인 경우에만 다음 월 헤더 검사를 수행하여 조기 break 방지!
+          if (validDatesInRow.length === 0) {
+            const isNextMonthTitle = candidateRow.some(cell => {
+              const cs = String(cell || '').trim();
+              if (!cs) return false;
+              if (cs.match(/\d{4}[.\-\/년\s]+\d{1,2}[.\-\/월\s]+\d{1,2}/)) return false;
+              return Boolean(cs.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || cs.match(/^(\d{1,2})월$/));
+            });
+            if (isNextMonthTitle) break;
           }
 
           // [날짜 행 발견]: 유효 날짜가 1개 이상 들어있는 행
@@ -843,12 +904,28 @@ export default function ERSchedulePage() {
       // 2) YYYY-MM-DD 정규화 키 매핑 (1일이 2026-09-01로 100% 일치)
       const parts = day.date.split('-');
       if (parts.length === 3) {
-        const normKey = normalizeDateKey(parts[0], parts[1], parts[2]);
-        map.set(normKey, day);
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          const normKey = normalizeDateKey(y, m, d);
+          map.set(normKey, day);
 
-        // 비패딩 키(예: 2026-9-1)도 혹시 모를 상황을 대비해 등록
-        const unpaddedKey = `${parseInt(parts[0], 10)}-${parseInt(parts[1], 10)}-${parseInt(parts[2], 10)}`;
-        map.set(unpaddedKey, day);
+          // 비패딩 키(예: 2026-9-1)도 등록
+          map.set(`${y}-${m}-${d}`, day);
+
+          // 월만 패딩 키(예: 2026-09-1)
+          map.set(`${y}-${String(m).padStart(2, '0')}-${d}`, day);
+
+          // 일만 패딩 키(예: 2026-9-01)
+          map.set(`${y}-${m}-${String(d).padStart(2, '0')}`, day);
+        }
+      }
+
+      // 3) yearMonth + dayNum 조합 키 등록
+      if (day.yearMonth && day.dayNum) {
+        map.set(`${day.yearMonth}-${String(day.dayNum).padStart(2, '0')}`, day);
+        map.set(`${day.yearMonth}-${day.dayNum}`, day);
       }
     });
     return map;
@@ -1423,7 +1500,11 @@ export default function ERSchedulePage() {
                   {Array.from({ length: daysInMonth }).map((_, idx) => {
                     const d = idx + 1;
                     const dateStr = normalizeDateKey(year, month, d);
-                    const dayData = scheduleMap.get(dateStr) || scheduleMap.get(`${ymStr}-${String(d).padStart(2, '0')}`) || scheduleMap.get(`${year}-${month}-${d}`);
+                    const dayData = scheduleMap.get(dateStr) 
+                      || scheduleMap.get(`${ymStr}-${String(d).padStart(2, '0')}`) 
+                      || scheduleMap.get(`${ymStr}-${d}`) 
+                      || scheduleMap.get(`${year}-${month}-${d}`) 
+                      || scheduleMap.get(`${year}-${month}-${String(d).padStart(2, '0')}`);
                     const dateObj = new Date(year, month - 1, d);
                     const dayOfWeek = dateObj.getDay();
                     const isSun = dayOfWeek === 0;
