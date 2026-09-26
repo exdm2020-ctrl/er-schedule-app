@@ -553,10 +553,7 @@ export default function ERSchedulePage() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // [요구사항 1]: 아이폰 네이티브 날짜 선택기(Date Picker) 상태
-  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [tempPickerYear, setTempPickerYear] = useState<number>(2026);
-  const [tempPickerMonth, setTempPickerMonth] = useState<number>(9);
+  // [요구사항 1]: 오직 기기 네이티브 달력 선택기(input type="month") 단일화 강제
   const monthInputRef = useRef<HTMLInputElement>(null);
 
   // [요구사항 1]: 기기에 등록된 Face ID 패스키 존재 여부 상태
@@ -1250,9 +1247,10 @@ export default function ERSchedulePage() {
         {/* ========================================================= */}
         <div className="px-4 pt-2.5 pb-2 space-y-2 border-b border-zinc-900 bg-zinc-950">
           <div className="flex items-center justify-between">
-            {/* 이전/다음 달 이동 및 대형 [YYYY년 M월] 버튼 */}
+            {/* 이전/다음 달 이동 및 대형 [YYYY년 M월] 기기 네이티브 Date Picker 단일화 */}
             <div className="flex items-center gap-1.5">
               <button
+                type="button"
                 onClick={handlePrevMonth}
                 aria-label="이전"
                 className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors active:scale-95"
@@ -1260,22 +1258,34 @@ export default function ERSchedulePage() {
                 <ChevronLeft className="w-4 h-4" />
               </button>
 
-              {/* [요구사항 1]: 중앙의 "YYYY년 M월" 텍스트 크기를 키우고 굵게(font-bold, text-xl) + 탭하면 Date Picker 오픈 */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTempPickerYear(currentYear);
-                  setTempPickerMonth(currentMonth);
-                  setIsDatePickerOpen(true);
-                }}
-                className="text-xl font-bold text-white hover:text-yellow-400 active:scale-95 transition-all px-2 py-1 rounded-xl hover:bg-zinc-900 flex items-center gap-1 tracking-tight group cursor-pointer"
-                title="연도 및 월 선택 (Date Picker)"
+              {/* [요구사항 1]: 오직 기기 네이티브 달력 선택 창만 뜨도록 강제 (웹 커스텀 모달 완전 배제, 투명 input overlay) */}
+              <label
+                className="relative text-xl font-bold text-white hover:text-yellow-400 active:scale-95 transition-all px-2.5 py-1 rounded-xl hover:bg-zinc-900 flex items-center gap-1 tracking-tight group cursor-pointer"
+                title="기기 네이티브 달력으로 날짜 선택"
               >
                 <span>{currentYear}년 {currentMonth}월</span>
                 <ChevronDown className="w-4 h-4 text-zinc-400 group-hover:text-yellow-400 transition-colors" />
-              </button>
+
+                {/* 텍스트 영역 전체를 덮어 터치 시 100% 아이폰/스마트폰 고유 네이티브 스크롤 피커 실행 */}
+                <input
+                  type="month"
+                  ref={monthInputRef}
+                  value={`${currentYear}-${String(currentMonth).padStart(2, '0')}`}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      const [y, m] = e.target.value.split('-').map(Number);
+                      if (y && m) {
+                        setCurrentYear(y);
+                        setCurrentMonth(m);
+                      }
+                    }
+                  }}
+                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
+                />
+              </label>
 
               <button
+                type="button"
                 onClick={handleNextMonth}
                 aria-label="다음"
                 className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 transition-colors active:scale-95"
@@ -1702,132 +1712,7 @@ export default function ERSchedulePage() {
           </div>
         )}
 
-        {/* ========================================================= */}
-        {/* 6. 아이폰 네이티브 날짜 선택기 (iOS Bottom Sheet Wheel Date Picker) */}
-        {/* ========================================================= */}
-        {isDatePickerOpen && (
-          <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
-            {/* 백드롭 클릭 시 닫기 */}
-            <div className="absolute inset-0" onClick={() => setIsDatePickerOpen(false)} />
 
-            {/* iOS 스타일 바텀 시트 */}
-            <div className="relative w-full max-w-md mx-auto bg-zinc-900 border-t border-zinc-800 rounded-t-3xl shadow-2xl p-5 pb-safe z-10 animate-in slide-in-from-bottom duration-250 text-zinc-100 select-none">
-              {/* 핸들 바 */}
-              <div className="w-10 h-1 bg-zinc-700/80 rounded-full mx-auto mb-3" />
-
-              {/* 상단 컨트롤 바 */}
-              <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setIsDatePickerOpen(false)}
-                  className="text-sm font-semibold text-zinc-400 hover:text-zinc-200 px-2 py-1 transition-colors active:scale-95"
-                >
-                  취소
-                </button>
-                <div className="text-sm font-extrabold text-white tracking-tight flex items-center gap-1.5">
-                  <CalendarIcon className="w-4 h-4 text-yellow-400" />
-                  <span>날짜 선택</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCurrentYear(tempPickerYear);
-                    setCurrentMonth(tempPickerMonth);
-                    setIsDatePickerOpen(false);
-                  }}
-                  className="text-sm font-black text-yellow-400 hover:text-yellow-300 px-2 py-1 transition-colors active:scale-95"
-                >
-                  완료
-                </button>
-              </div>
-
-              {/* 아이폰 네이티브 감성 듀얼 휠(Wheel) 피커 */}
-              <div className="relative my-4 h-48 flex items-center justify-center overflow-hidden bg-zinc-950/60 rounded-2xl border border-zinc-800/80">
-                {/* 중앙 하이라이트 밴드 (iOS 휠 선택 표시선) */}
-                <div className="absolute left-2 right-2 h-11 border-y border-yellow-400/30 bg-yellow-400/5 rounded-xl pointer-events-none z-0" />
-
-                {/* 좌측: 연도 휠 컬럼 */}
-                <div className="flex-1 h-full overflow-y-auto py-18 text-center scroll-smooth z-10 space-y-1">
-                  {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => {
-                    const isSelected = tempPickerYear === y;
-                    return (
-                      <div
-                        key={y}
-                        onClick={() => setTempPickerYear(y)}
-                        className={`h-9 flex items-center justify-center cursor-pointer transition-all duration-150 ${
-                          isSelected
-                            ? 'text-yellow-400 font-black text-lg scale-110 drop-shadow-sm'
-                            : 'text-zinc-500 hover:text-zinc-300 text-sm font-medium'
-                        }`}
-                      >
-                        {y}년
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="w-px h-32 bg-zinc-800/80" />
-
-                {/* 우측: 월 휠 컬럼 */}
-                <div className="flex-1 h-full overflow-y-auto py-18 text-center scroll-smooth z-10 space-y-1">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(m => {
-                    const isSelected = tempPickerMonth === m;
-                    return (
-                      <div
-                        key={m}
-                        onClick={() => setTempPickerMonth(m)}
-                        className={`h-9 flex items-center justify-center cursor-pointer transition-all duration-150 ${
-                          isSelected
-                            ? 'text-yellow-400 font-black text-lg scale-110 drop-shadow-sm'
-                            : 'text-zinc-500 hover:text-zinc-300 text-sm font-medium'
-                        }`}
-                      >
-                        {m}월
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 하단 퀵 액션 버튼 & 네이티브 인풋 연동 */}
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const now = new Date();
-                    setTempPickerYear(now.getFullYear());
-                    setTempPickerMonth(now.getMonth() + 1);
-                  }}
-                  className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 text-xs font-bold text-zinc-300 transition-all flex items-center justify-center gap-1"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-                  <span>이번 달로 맞추기</span>
-                </button>
-
-                {/* 네이티브 <input type="month"> 연동 버튼 */}
-                <label className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 active:scale-98 text-xs font-bold text-zinc-300 transition-all flex items-center justify-center gap-1 cursor-pointer relative overflow-hidden">
-                  <CalendarIcon className="w-3.5 h-3.5 text-sky-400" />
-                  <span>기기 달력으로 선택</span>
-                  <input
-                    type="month"
-                    ref={monthInputRef}
-                    value={`${tempPickerYear}-${String(tempPickerMonth).padStart(2, '0')}`}
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        const [y, m] = e.target.value.split('-').map(Number);
-                        if (y && m) {
-                          setTempPickerYear(y);
-                          setTempPickerMonth(m);
-                        }
-                      }
-                    }}
-                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  />
-                </label>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </>
   );
