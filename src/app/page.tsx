@@ -159,10 +159,15 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
           const dateRow = rawRows[nextR] || [];
           const shiftRow = rawRows[nextR + 1] || [];
 
-          // 새로운 월 헤더가 나오면 현재 월 블록 파싱 종료
+          // 새로운 월 헤더가 나오면 현재 월 블록 파싱 종료 (단, "2026-09-01"처럼 일자가 포함된 날짜 셀은 절대 월 헤더가 아님!)
           const hasNextMonthHeader = dateRow.some(cell => {
             const cs = String(cell || '').trim();
-            return cs.match(/(\d{4})[.\-년\s]+(\d{1,2})월?/) || cs.match(/^(\d{1,2})월$/);
+            if (!cs) return false;
+            // 1) 2026-09-01, 2026.09.01 등 일자까지 포함된 전체 날짜는 날짜 셀이므로 월 헤더가 아님
+            if (cs.match(/\d{4}[.\-\/년\s]+\d{1,2}[.\-\/월\s]+\d{1,2}/)) return false;
+            // 2) 순수 월 제목 행 (예: "2026.10월", "2026년 10월", "2026-10", "10월" 등 일자 없이 끝나는 경우)
+            const isMonthTitle = cs.match(/^(\d{4})[.\-년\s]+(\d{1,2})월?$/) || cs.match(/^(\d{1,2})월$/);
+            return Boolean(isMonthTitle);
           });
           if (hasNextMonthHeader) break;
 
@@ -178,48 +183,78 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
             const dateCellVal = String(dateRow[col] || '').trim();
             if (!dateCellVal) continue;
 
-            // [버그 1 해결]: "9/1", "9.1", "1일", "1(화)", "01", "1" 등 모든 패턴에서 정확한 '일(Day)' 숫자 추출
+            // [매달 1일 버그 완벽 해결]: "2026-09-01", "2026-10-01", "2026.09.01", "9/1", "1일", "1(화)", "01", "1" 등 모든 패턴 지원
             let dayNum: number | null = null;
+            let cellYear = fallbackYear;
+            let cellMonth = 9;
 
-            // 1) "9/1" 또는 "9.1" 형태인 경우 뒤쪽 숫자를 일자로 추출
-            const mdMatch = dateCellVal.match(/\b\d{1,2}[\/.](\d{1,2})\b/);
-            if (mdMatch) {
-              dayNum = parseInt(mdMatch[1], 10);
+            if (currentYearMonth) {
+              const [y, m] = currentYearMonth.split('-').map(Number);
+              cellYear = y || fallbackYear;
+              cellMonth = m || 1;
+            }
+
+            // [핵심 1]: 매달 1일이 "2026-09-01", "2026-10-01" 등 전체 날짜로 표기된 경우 최우선 추출!
+            const fullYmdMatch = dateCellVal.match(/(\d{4})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
+            if (fullYmdMatch) {
+              cellYear = parseInt(fullYmdMatch[1], 10);
+              cellMonth = parseInt(fullYmdMatch[2], 10);
+              dayNum = parseInt(fullYmdMatch[3], 10);
+              currentYearMonth = `${cellYear}-${String(cellMonth).padStart(2, '0')}`;
+            } else if (/^\d{5}$/.test(dateCellVal)) {
+              // 엑셀 날짜 일련번호(Serial Date) 처리 (예: 46266 -> 2026-09-01)
+              const serial = parseInt(dateCellVal, 10);
+              if (serial >= 40000 && serial <= 60000) {
+                const dObj = new Date(Math.round((serial - 25569) * 86400 * 1000));
+                cellYear = dObj.getUTCFullYear();
+                cellMonth = dObj.getUTCMonth() + 1;
+                dayNum = dObj.getUTCDate();
+                currentYearMonth = `${cellYear}-${String(cellMonth).padStart(2, '0')}`;
+              }
             } else {
-              // 2) "1일", "1(화)" 또는 숫자만 있는 경우
-              const dMatch = dateCellVal.match(/^(\d{1,2})/);
-              if (dMatch) {
-                dayNum = parseInt(dMatch[1], 10);
+              // 2) "9/1", "9.1", "9월 1일" 형태
+              const mdMatch = dateCellVal.match(/^(\d{1,2})[\/.](\d{1,2})/);
+              if (mdMatch) {
+                cellMonth = parseInt(mdMatch[1], 10);
+                dayNum = parseInt(mdMatch[2], 10);
               } else {
-                const anyNum = dateCellVal.match(/\d+/);
-                if (anyNum) dayNum = parseInt(anyNum[0], 10);
+                // 3) "1일", "1(화)", "1", "01" 등 단순 숫자/일자 형태
+                const dMatch = dateCellVal.match(/^(\d{1,2})\s*(일|\(|$)/);
+                if (dMatch) {
+                  dayNum = parseInt(dMatch[1], 10);
+                } else {
+                  const anyNum = dateCellVal.match(/^(\d{1,2})/);
+                  if (anyNum) {
+                    dayNum = parseInt(anyNum[1], 10);
+                  } else {
+                    const fallbackNum = dateCellVal.match(/\d+/);
+                    if (fallbackNum) dayNum = parseInt(fallbackNum[0], 10);
+                  }
+                }
               }
             }
 
             if (dayNum === null || isNaN(dayNum) || dayNum < 1 || dayNum > 31) continue;
 
-            // 1주차에서 1일 이전 요일(지난달 말일 25~31)이 1일 앞에 섞여 있는 경우 방어
-            if (!hasSeenDayOneInCurrentBlock && dayNum >= 20) {
-              continue;
-            }
+            // 1일 플래그 기록 및 전월 말일 방어
             if (dayNum === 1) {
               hasSeenDayOneInCurrentBlock = true;
+            } else if (!hasSeenDayOneInCurrentBlock && dayNum >= 20 && !fullYmdMatch) {
+              // 1주차에서 1일 이전 요일에 지난달 말일(25~31)이 섞여 있는 경우 방어 (전체 날짜로 표기된 경우는 제외)
+              continue;
             }
 
             foundValidDateInThisRow = true;
 
-            // 공휴일 메모 (예: "1(신정)", "25(추석)")
+            // 공휴일 메모 (예: "1(신정)", "2026-09-01(신정)", "25(추석)")
             const memoMatch = dateCellVal.match(/\((.*?)\)/);
             const holidayNote = memoMatch ? memoMatch[1].trim() : null;
 
-            // [버그 1 해결]: 무조건 normalizeDateKey를 사용하여 완벽한 YYYY-MM-DD(예: 2026-09-01)로 포맷 통일
-            const [yStr, mStr] = currentYearMonth.split('-');
-            const yearNum = parseInt(yStr, 10);
-            const monthNum = parseInt(mStr, 10);
-            const dateStr = normalizeDateKey(yearNum, monthNum, dayNum);
+            // [버그 완벽 해결]: 무조건 normalizeDateKey를 사용하여 완벽한 YYYY-MM-DD(예: 2026-09-01)로 포맷 통일
+            const dateStr = normalizeDateKey(cellYear, cellMonth, dayNum);
 
             // 로컬 날짜 객체로 요일 계산
-            const dateObj = new Date(yearNum, monthNum - 1, dayNum);
+            const dateObj = new Date(cellYear, cellMonth - 1, dayNum);
             const dayOfWeek = dateObj.getDay();
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
             const isWeekendOrHol = isWeekend || Boolean(holidayNote);
