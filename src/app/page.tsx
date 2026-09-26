@@ -503,10 +503,21 @@ export default function ERSchedulePage() {
     return false;
   };
 
-  // [핵심 1-2]: 앱 시작 시 무조건 잠금화면(false) 강제 & LocalStorage 데이터 자동 로드
+  // [핵심 1-2]: 앱 시작 시 무조건 잠금화면(false) 강제 & LocalStorage 데이터 자동 로드 & Face ID 자동 실행
   useEffect(() => {
     setIsUnlocked(false);
     loadSavedSchedule();
+
+    // [요구사항 1]: 기기에 이미 등록된 Passkey(Face ID) 정보가 존재한다면 즉시 Face ID 자동 실행 (Auto-trigger)
+    const existingCredId = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_WEBAUTHN_ID) : null;
+    if (existingCredId) {
+      const timer = setTimeout(() => {
+        handleFaceID(true).catch(err => {
+          console.warn('Face ID 자동 실행 에러 (보안 정책 등으로 차단된 경우 수동 터치 가능):', err);
+        });
+      }, 150);
+      return () => clearTimeout(timer);
+    }
   }, []);
 
   // [핵심 1-3]: 수동 저장 함수
@@ -523,10 +534,12 @@ export default function ERSchedulePage() {
     }
   };
 
-  // [요구사항 1]: 실제 기기 Face ID (WebAuthn / Passkey) 표준 연동
-  const handleFaceID = async () => {
+  // [요구사항 1]: 실제 기기 Face ID (WebAuthn / Passkey) 표준 연동 및 자동 실행 지원
+  const handleFaceID = async (isAuto = false) => {
     if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
-      alert('현재 브라우저/기기 환경에서 Face ID(WebAuthn)를 지원하지 않습니다. 암호(PIN)를 입력해 주세요.');
+      if (!isAuto) {
+        alert('현재 브라우저/기기 환경에서 Face ID(WebAuthn)를 지원하지 않습니다. 암호(PIN)를 입력해 주세요.');
+      }
       return;
     }
 
@@ -561,13 +574,20 @@ export default function ERSchedulePage() {
             return;
           }
         } catch (getErr: any) {
-          console.warn('Face ID get() 인증 실패 또는 재등록 필요:', getErr);
+          console.warn('Face ID get() 인증 실패 또는 취소:', getErr);
+          if (isAuto) {
+            // 자동 실행 실패 시 조용히 넘어가서 사용자가 수동으로 아이콘을 누르거나 PIN을 칠 수 있게 함
+            return;
+          }
           if (getErr.name === 'NotAllowedError') {
             // 사용자가 생체 인증 화면을 취소한 경우 리턴
             return;
           }
           // 기기에서 패스키를 찾을 수 없거나 다른 기기일 경우 아래 create()로 재등록 시도
         }
+      } else if (isAuto) {
+        // 자동 실행일 때 패스키가 아직 없으면 create()를 자동으로 띄우지 않고 사용자가 준비되었을 때 수동으로 누르게 함
+        return;
       }
 
       // 2. 최초 사용 시 또는 재등록: navigator.credentials.create() 호출 -> 실제 아이폰 Face ID 등록 팝업
@@ -607,6 +627,7 @@ export default function ERSchedulePage() {
       }
     } catch (err: any) {
       console.error('Face ID WebAuthn 오류:', err);
+      if (isAuto) return;
       if (err.name === 'NotAllowedError') {
         // 사용자가 취소한 경우 조용히 리턴
         return;
@@ -829,35 +850,25 @@ export default function ERSchedulePage() {
           <link rel="manifest" href="/manifest.json" />
         </head>
         <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto flex flex-col items-center justify-between p-6 select-none relative overflow-hidden">
-        {/* 상단 인포 */}
-        <div className="w-full flex items-center justify-between pt-safe text-zinc-500 text-xs">
-          <span className="flex items-center gap-1 font-bold text-zinc-400">
-            <ShieldCheck className="w-3.5 h-3.5 text-yellow-400" />
-            현우 전용 모드
-          </span>
-          <span className="text-[11px]">ER Schedule</span>
+        {/* 상단 인포 (불필요한 텍스트 제거) */}
+        <div className="w-full flex items-center justify-end pt-safe text-zinc-500 text-xs">
+          <span className="text-[11px] font-semibold tracking-wider text-zinc-600">ER Schedule</span>
         </div>
 
         {/* 중앙 Face ID & PIN 헤더 */}
         <div className="flex flex-col items-center my-auto w-full max-w-xs">
           {/* Face ID 인터랙션 버튼 */}
           <button
-            onClick={handleFaceID}
-            className="w-20 h-20 rounded-3xl bg-zinc-900 border border-zinc-800 hover:border-yellow-400/80 active:scale-95 transition-all flex flex-col items-center justify-center text-yellow-400 mb-6 shadow-xl group cursor-pointer"
-            title="Face ID로 즉시 해제"
+            type="button"
+            onClick={() => handleFaceID(false)}
+            className="w-20 h-20 rounded-3xl bg-zinc-900 border border-zinc-800 hover:border-yellow-400/80 active:scale-95 transition-all flex flex-col items-center justify-center text-yellow-400 mb-8 shadow-xl group cursor-pointer"
+            title="Face ID"
           >
             <ScanFace className="w-10 h-10 group-hover:scale-110 transition-transform" />
             <span className="text-[9px] font-black text-zinc-400 mt-1 uppercase tracking-tighter">Face ID</span>
           </button>
 
-          <h2 className="text-base font-black tracking-tight text-white mb-1">
-            스케줄 잠금 해제
-          </h2>
-          <p className="text-2xs text-zinc-400 mb-6">
-            Face ID를 누르거나 4자리 암호를 입력하세요
-          </p>
-
-          {/* PIN 4자리 표시 인디케이터 */}
+          {/* PIN 4자리 표시 인디케이터 (텍스트 힌트 없이 깔끔하게 도트만 표시) */}
           <div className={`flex items-center gap-4 mb-8 ${pinError ? 'animate-bounce' : ''}`}>
             {[0, 1, 2, 3].map(idx => {
               const isFilled = pinInput.length > idx;
@@ -898,7 +909,7 @@ export default function ERSchedulePage() {
               0
             </button>
             <button
-              onClick={handleFaceID}
+              onClick={() => handleFaceID(false)}
               className="w-16 h-16 rounded-full text-yellow-400 hover:text-yellow-300 font-bold text-xs mx-auto flex items-center justify-center"
             >
               Face ID
@@ -1254,14 +1265,14 @@ export default function ERSchedulePage() {
 
                       return (
                         <div
-                          className={`flex items-center gap-1 px-1 py-0.5 rounded border leading-tight w-full transition-all overflow-hidden ${baseTheme} ${alignClass}`}
+                          className={`flex items-center gap-0.5 px-0.5 py-0.5 rounded border leading-none w-full transition-all ${baseTheme} ${alignClass}`}
                           title={`${displayCode} ${shift.workers.join(', ')}`}
                         >
-                          <span className={`shrink-0 ${codeTheme}`}>
+                          <span className={`shrink-0 text-[8px] sm:text-[9px] font-bold leading-none ${codeTheme}`}>
                             {displayCode}
                           </span>
-                          {/* [요구사항 2]: text-[9px] truncate whitespace-nowrap overflow-hidden block w-full 강제 한 줄 처리 */}
-                          <span className={`text-[9px] truncate whitespace-nowrap overflow-hidden block w-full no-underline ${alignClass}`}>
+                          {/* [요구사항 2]: truncate, overflow-hidden, whitespace-nowrap 전부 제거 및 break-all 한 줄 압축 */}
+                          <span className="text-[8px] sm:text-[9px] leading-none tracking-tighter whitespace-pre-wrap break-all w-full text-center no-underline">
                             {shift.workers.map((worker, wIdx) => {
                               const isMe = worker === '현우';
                               return (
