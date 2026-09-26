@@ -14,14 +14,16 @@ import {
   Lock,
   Unlock,
   ShieldCheck,
-  ScanFace
+  ScanFace,
+  KeyRound
 } from 'lucide-react';
 
-const MEDICAL_CROSS_ICON =
-  "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CiAgPHJlY3Qgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHJ4PSIxMTIiIGZpbGw9IiMwRDBEMEQiLz4KICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMjEsIDExNikiPgogICAgPCEtLSDsupjrprDrjZQg7Z2w7IOJIOuzuOyytCAtLT4KICAgIDxyZWN0IHg9IjAiIHk9IjE2IiB3aWR0aD0iMjcwIiBoZWlnaHQ9IjI4MCIgcng9IjM2IiBmaWxsPSIjRkZGRkZGIi8+CiAgICA8IS0tIOy6mOumsOuNlCDsg4Hri6gg67mo6rCE7IOJIO2XpOuNlCAtLT4KICAgIDxwYXRoIGQ9Ik0gMCA1MiBDIDAgMzIgMTYgMTYgMzYgMTYgTCAyMzQgMTYgQyAyNTQgMTYgMjcwIDMyIDI3MCA1MiBMIDI3MCA4OCBMIDAgODggWiIgZmlsbD0iI0VFNDM0MyIvPgogICAgPCEtLSDsg4Hri6ggMuqwnOydmCDqsoDsnYDsg4kg67CU7J24642UIOungSAtLT4KICAgIDxyZWN0IHg9IjUyIiB5PSIwIiB3aWR0aD0iMjAiIGhlaWdodD0iMzQiIHJ4PSIxMCIgZmlsbD0iIzBEMEQwRCIvPgogICAgPHJlY3QgeD0iMTk4IiB5PSIwIiB3aWR0aD0iMjAiIGhlaWdodD0iMzQiIHJ4PSIxMCIgZmlsbD0iIzBEMEQwRCIvPgogICAgPCEtLSDsoJXspJHslZkg67mo6rCE7IOJIOyLreyekCDrp4jtgawgLS0+CiAgICA8cmVjdCB4PSI3NSIgeT0iMTYwIiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjQyIiByeD0iMTQiIGZpbGw9IiNFRTQzNDMiLz4KICAgIDxyZWN0IHg9IjExNCIgeT0iMTIxIiB3aWR0aD0iNDIiIGhlaWdodD0iMTIwIiByeD0iMTQiIGZpbGw9IiNFRTQzNDMiLz4KICA8L2c+Cjwvc3ZnPg==";
+const FULL_BLEED_ICON_SVG =
+  "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CiAgPCEtLSDqvYkg7LCsIOqygOydgOyDiSDsgqzqsIHtmJUg67Cw6rK9IChGdWxsIEJsZWVkKSAtLT4KICA8cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzAwMDAwMCIvPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEyMSwgMTE2KSI+CiAgICA8IS0tIOy6mOumsOuNlCDtnbDsg4kg67O47LK0IC0tPgogICAgPHJlY3QgeD0iMCIgeT0iMTYiIHdpZHRoPSIyNzAiIGhlaWdodD0iMjgwIiByeD0iMzYiIGZpbGw9IiNGRkZGRkYiLz4KICAgIDwhLS0g7LqY66aw642UIOyDgeuLqCDruajqsITsg4kg7Zek642UIC0tPgogICAgPHBhdGggZD0iTSAwIDUyIEMgMCAzMiAxNiAxNiAzNiAxNiBMIDIzNCAxNiBDIDI1NCAxNiAyNzAgMzIgMjcwIDUyIEwgMjcwIDg4IEwgMCA4OCBaIiBmaWxsPSIjRUU0MzQzIi8+CiAgICA8IS0tIOyDgeuLqCAy6rCc7J2YIOqygOydgOyDiSDrsJTsnbjrjZQg66eBIC0tPgogICAgPHJlY3QgeD0iNTIiIHk9IjAiIHdpZHRoPSIyMCIgaGVpZ2h0PSIzNCIgcng9IjEwIiBmaWxsPSIjMDAwMDAwIi8+CiAgICA8cmVjdCB4PSIxOTgiIHk9IjAiIHdpZHRoPSIyMCIgaGVpZ2h0PSIzNCIgcng9IjEwIiBmaWxsPSIjMDAwMDAwIi8+CiAgICA8IS0tIOygleykkeyVmSDruajqsITsg4kg7Iut7J6QIOuniO2BrCAtLT4KICAgIDxyZWN0IHg9Ijc1IiB5PSIxNjAiIHdpZHRoPSIxMjAiIGhlaWdodD0iNDIiIHJ4PSIxNCIgZmlsbD0iI0VFNDM0MyIvPgogICAgPHJlY3QgeD0iMTE0IiB5PSIxMjEiIHdpZHRoPSI0MiIgaGVpZ2h0PSIxMjAiIHJ4PSIxNCIgZmlsbD0iI0VFNDM0MyIvPgogIDwvZz4KPC9zdmc+";
 
 const STORAGE_DATA_KEY = 'er_schedule_data_v2';
 const STORAGE_AUTH_KEY = 'er_schedule_auth_token_v2';
+const STORAGE_PIN_KEY = 'er_schedule_custom_pin_v2';
 const DEFAULT_PASSCODE = process.env.NEXT_PUBLIC_APP_PASSWORD || '1234';
 
 // ==========================================
@@ -428,6 +430,22 @@ export default function ERSchedulePage() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState(false);
 
+  // 비밀번호 변경 모달 상태
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [currentPinInput, setCurrentPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [confirmPinInput, setConfirmPinInput] = useState('');
+  const [pinChangeError, setPinChangeError] = useState<string | null>(null);
+  const [pinChangeSuccess, setPinChangeSuccess] = useState<string | null>(null);
+
+  // 현재 설정된 PIN 반환
+  const getActivePin = () => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(STORAGE_PIN_KEY) || DEFAULT_PASSCODE;
+    }
+    return DEFAULT_PASSCODE;
+  };
+
   // 스케줄 데이터 상태
   const [scheduleList, setScheduleList] = useState<ParsedDay[]>(() => generateInitialSampleData());
   const [currentYear, setCurrentYear] = useState<number>(2026);
@@ -490,7 +508,8 @@ export default function ERSchedulePage() {
       setPinError(false);
 
       if (next.length === 4) {
-        if (next === DEFAULT_PASSCODE) {
+        const correctPin = getActivePin();
+        if (next === correctPin) {
           localStorage.setItem(STORAGE_AUTH_KEY, 'pin_verified');
           setIsUnlocked(true);
           setPinInput('');
@@ -502,6 +521,41 @@ export default function ERSchedulePage() {
         }
       }
     }
+  };
+
+  // 비밀번호 변경 처리
+  const handleChangePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinChangeError(null);
+    setPinChangeSuccess(null);
+
+    const activePin = getActivePin();
+
+    if (currentPinInput !== activePin) {
+      setPinChangeError('현재 비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
+    if (!/^\d{4}$/.test(newPinInput)) {
+      setPinChangeError('새 비밀번호는 4자리 숫자여야 합니다.');
+      return;
+    }
+
+    if (newPinInput !== confirmPinInput) {
+      setPinChangeError('새 비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
+    localStorage.setItem(STORAGE_PIN_KEY, newPinInput);
+    setPinChangeSuccess('비밀번호가 성공적으로 변경되었습니다!');
+    setTimeout(() => {
+      setIsPinModalOpen(false);
+      setCurrentPinInput('');
+      setNewPinInput('');
+      setConfirmPinInput('');
+      setPinChangeSuccess(null);
+      setPinChangeError(null);
+    }, 1000);
   };
 
   // 앱 즉시 다시 잠그기
@@ -643,7 +697,23 @@ export default function ERSchedulePage() {
   // ==========================================
   if (!isUnlocked) {
     return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto flex flex-col items-center justify-between p-6 select-none relative overflow-hidden">
+      <>
+        <head>
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+          <meta name="apple-mobile-web-app-title" content="ER Schedule" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <meta name="theme-color" content="#000000" />
+          <link rel="icon" href="/favicon.png" type="image/png" />
+          <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
+          <link rel="icon" href="/icon-512.png" sizes="512x512" type="image/png" />
+          <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+          <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+          <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+          <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon-precomposed.png" />
+          <link rel="manifest" href="/manifest.json" />
+        </head>
+        <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto flex flex-col items-center justify-between p-6 select-none relative overflow-hidden">
         {/* 상단 인포 */}
         <div className="w-full flex items-center justify-between pt-safe text-zinc-500 text-xs">
           <span className="flex items-center gap-1 font-bold text-zinc-400">
@@ -721,12 +791,131 @@ export default function ERSchedulePage() {
           </div>
         </div>
 
-        <div className="pb-safe text-2xs text-zinc-600">
-          기본 비밀번호: 1234
+        {/* 하단 비밀번호 변경 및 안내 */}
+        <div className="pb-safe flex flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setIsPinModalOpen(true);
+              setPinChangeError(null);
+              setPinChangeSuccess(null);
+              setCurrentPinInput('');
+              setNewPinInput('');
+              setConfirmPinInput('');
+            }}
+            className="text-2xs text-zinc-400 hover:text-yellow-400 transition-colors font-medium py-1.5 px-3.5 bg-zinc-900/80 hover:bg-zinc-800 rounded-full border border-zinc-800 flex items-center gap-1.5 active:scale-95 shadow-xs"
+          >
+            <KeyRound className="w-3 h-3 text-yellow-400" />
+            <span>비밀번호 변경</span>
+          </button>
+          <div className="text-[10px] text-zinc-600">
+            기본 비밀번호: 1234
+          </div>
         </div>
+
+        {/* 비밀번호 변경 팝업 모달 */}
+        {isPinModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="absolute inset-0" onClick={() => setIsPinModalOpen(false)} />
+            <div className="relative w-full max-w-xs bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-5 z-10 animate-in zoom-in-95 duration-150 text-zinc-100">
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-yellow-400" />
+                  <h3 className="text-sm font-extrabold text-white">비밀번호 변경</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPinModalOpen(false)}
+                  className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleChangePinSubmit} className="mt-4 space-y-3">
+                <div>
+                  <label className="text-2xs font-bold text-zinc-400 block mb-1">
+                    현재 비밀번호 (4자리)
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={currentPinInput}
+                    onChange={(e) => setCurrentPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="현재 암호 입력"
+                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-center text-sm font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-2xs font-bold text-zinc-400 block mb-1">
+                    새 비밀번호 (4자리)
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={newPinInput}
+                    onChange={(e) => setNewPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="새 숫자 4자리"
+                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-center text-sm font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-2xs font-bold text-zinc-400 block mb-1">
+                    새 비밀번호 확인 (4자리)
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={confirmPinInput}
+                    onChange={(e) => setConfirmPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="새 숫자 4자리 재입력"
+                    className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-center text-sm font-mono tracking-widest text-white focus:outline-none focus:border-yellow-400"
+                    required
+                  />
+                </div>
+
+                {pinChangeError && (
+                  <div className="text-2xs text-rose-400 bg-rose-950/50 border border-rose-900/80 p-2 rounded-lg text-center font-bold">
+                    {pinChangeError}
+                  </div>
+                )}
+
+                {pinChangeSuccess && (
+                  <div className="text-2xs text-emerald-400 bg-emerald-950/50 border border-emerald-900/80 p-2 rounded-lg text-center font-bold">
+                    {pinChangeSuccess}
+                  </div>
+                )}
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsPinModalOpen(false)}
+                    className="flex-1 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs transition-colors"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 rounded-lg bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs transition-colors shadow-sm"
+                  >
+                    변경 완료
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
-    );
-  }
+    </>
+  );
+}
 
   // ==========================================
   // [메인 캘린더 화면]: 100% 다크 모드 & 3-Row 정렬
@@ -734,24 +923,29 @@ export default function ERSchedulePage() {
   return (
     <>
       <head>
-        <link rel="icon" href="/icon.png" type="image/png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="ER Schedule" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="theme-color" content="#000000" />
+        <link rel="icon" href="/favicon.png" type="image/png" />
+        <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
+        <link rel="icon" href="/icon-512.png" sizes="512x512" type="image/png" />
         <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-        <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon-precomposed.png" />
+        <link rel="manifest" href="/manifest.json" />
       </head>
 
       <div className="min-h-screen bg-zinc-950 text-zinc-50 w-full max-w-md mx-auto flex flex-col shadow-2xl relative select-none">
         {/* ========================================================= */}
-        {/* 1. 상단 심플 헤더: [🏥 ER Schedule] & [엑셀 업로드] */}
+        {/* 1. 상단 심플 헤더: [ER Schedule] & [엑셀 업로드] (아이콘 완전 제거) */}
         {/* ========================================================= */}
         <header className="sticky top-0 z-30 pt-safe bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🏥</span>
-            <h1 className="text-base font-extrabold tracking-tight text-white flex items-center gap-1.5">
-              <span>ER Schedule</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
-            </h1>
-          </div>
+          <h1 className="text-base font-extrabold tracking-tight text-white">
+            ER Schedule
+          </h1>
 
           <div className="flex items-center gap-1.5">
             <button
@@ -760,15 +954,6 @@ export default function ERSchedulePage() {
             >
               <Upload className="w-3.5 h-3.5 text-yellow-400" />
               <span>엑셀 업로드</span>
-            </button>
-
-            {/* 다시 잠금 버튼 */}
-            <button
-              onClick={handleLock}
-              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 transition-colors"
-              title="화면 잠그기"
-            >
-              <Lock className="w-3.5 h-3.5" />
             </button>
           </div>
         </header>
@@ -912,31 +1097,19 @@ export default function ERSchedulePage() {
                     const nightShift = dayData?.shifts.find(s => s.code === 'N');
 
                     // 근무조 렌더링 헬퍼 컴포넌트 ("현우" 포함 시 전체 뱃지 노란색 Override)
+                    // 근무조 렌더링 헬퍼 컴포넌트 (메인 달력: 무채색화 & "현우" 노란색 하이라이트 + 밑줄 제거)
                     const renderShiftSlot = (shift?: ShiftItem) => {
                       if (!shift) return null;
                       const hasHyunwoo = shift.hasTargetUser;
 
-                      // 기본 테마
-                      let baseTheme = 'bg-zinc-800/80 border-zinc-700/80 text-zinc-300';
-                      let codeTheme = 'text-zinc-400 font-extrabold';
+                      // [요구사항 2]: 메인 달력 화면에서는 다른 사람들의 스케줄은 색상을 넣지 않고
+                      // 다크 모드에 어울리는 무채색 텍스트(text-zinc-400 등)로 통일하여 아주 심플하게 렌더링
+                      let baseTheme = 'bg-zinc-900/90 border-zinc-800/80 text-zinc-400';
+                      let codeTheme = 'text-zinc-500 font-bold';
 
-                      if (shift.code === 'D') {
-                        baseTheme = 'bg-sky-950/50 border-sky-800/70 text-sky-200';
-                        codeTheme = 'text-sky-400 font-black';
-                      } else if (shift.code === 'M1' || shift.code === 'M2' || shift.code === 'M') {
-                        baseTheme = 'bg-amber-950/50 border-amber-800/70 text-amber-200';
-                        codeTheme = 'text-amber-400 font-black';
-                      } else if (shift.code === 'H') {
-                        baseTheme = 'bg-emerald-950/50 border-emerald-800/70 text-emerald-200';
-                        codeTheme = 'text-emerald-400 font-black';
-                      } else if (shift.code === 'N') {
-                        baseTheme = 'bg-indigo-950/50 border-indigo-800/70 text-indigo-200';
-                        codeTheme = 'text-indigo-400 font-black';
-                      }
-
-                      // [핵심 2]: "현우"가 포함된 경우 전체 뱃지 컨테이너를 노란색(#fde047)으로 Override!
+                      // "현우"가 포함된 경우 전체 뱃지 컨테이너를 노란색(#fde047)으로 Override!
                       if (hasHyunwoo) {
-                        baseTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-md';
+                        baseTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-sm';
                         codeTheme = 'text-black font-black';
                       }
 
@@ -952,11 +1125,12 @@ export default function ERSchedulePage() {
                               const isMe = worker === '현우';
                               return (
                                 <React.Fragment key={wIdx}>
-                                  <span className={isMe ? 'underline decoration-black decoration-2 underline-offset-1 font-extrabold' : ''}>
+                                  {/* "현우" 이름 아래에 생기는 밑줄(underline) 효과 완전히 제거(no-underline) */}
+                                  <span className={isMe ? 'font-black no-underline' : 'no-underline'}>
                                     {worker}
                                   </span>
                                   {wIdx < shift.workers.length - 1 && (
-                                    <span className={hasHyunwoo ? 'text-black/50 mx-0.5' : 'text-zinc-600 mx-0.5'}>/</span>
+                                    <span className={hasHyunwoo ? 'text-black/40 mx-0.5' : 'text-zinc-600 mx-0.5'}>/</span>
                                   )}
                                 </React.Fragment>
                               );
@@ -1125,7 +1299,7 @@ export default function ERSchedulePage() {
                           return (
                             <span
                               key={wIdx}
-                              className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                              className={`px-2 py-0.5 rounded text-xs font-semibold no-underline ${
                                 isMe && hasHyunwoo
                                   ? 'bg-black text-yellow-400 font-black shadow-sm'
                                   : workerTagTheme
