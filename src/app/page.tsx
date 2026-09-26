@@ -25,7 +25,27 @@ const FULL_BLEED_ICON_SVG =
 const STORAGE_DATA_KEY = 'er_schedule_data_v2';
 const STORAGE_AUTH_KEY = 'er_schedule_auth_token_v2';
 const STORAGE_PIN_KEY = 'er_schedule_custom_pin_v2';
+const STORAGE_WEBAUTHN_ID = 'er_schedule_webauthn_cred_id';
 const DEFAULT_PASSCODE = process.env.NEXT_PUBLIC_APP_PASSWORD || '1234';
+
+// WebAuthn 버퍼 변환 유틸
+function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+function base64ToBuffer(base64: string): ArrayBuffer {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
 
 // ==========================================
 // 1. 타입 정의
@@ -503,18 +523,96 @@ export default function ERSchedulePage() {
     }
   };
 
-  // Face ID / 간편 생체 인증 시뮬레이션
+  // [요구사항 1]: 실제 기기 Face ID (WebAuthn / Passkey) 표준 연동
   const handleFaceID = async () => {
-    if (window.PublicKeyCredential && window.navigator.credentials) {
-      try {
-        // WebAuthn 호출 시도 (아이폰 Face ID / Touch ID)
-      } catch (e) {
-        // Fallback
-      }
+    if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials) {
+      alert('현재 브라우저/기기 환경에서 Face ID(WebAuthn)를 지원하지 않습니다. 암호(PIN)를 입력해 주세요.');
+      return;
     }
-    // 원터치 Face ID 확인 후 최신 데이터 재로드 및 잠금 해제
-    loadSavedSchedule();
-    setIsUnlocked(true);
+
+    try {
+      const existingCredId = localStorage.getItem(STORAGE_WEBAUTHN_ID);
+
+      // 1. 이미 Face ID 패스키가 등록된 경우: navigator.credentials.get() 호출 -> 실제 Face ID 스캔 팝업
+      if (existingCredId) {
+        try {
+          const challenge = new Uint8Array(32);
+          window.crypto.getRandomValues(challenge);
+
+          const assertion = await navigator.credentials.get({
+            publicKey: {
+              challenge,
+              timeout: 60000,
+              rpId: window.location.hostname,
+              allowCredentials: [
+                {
+                  id: base64ToBuffer(existingCredId),
+                  type: 'public-key',
+                  transports: ['internal'],
+                },
+              ],
+              userVerification: 'required',
+            },
+          });
+
+          if (assertion) {
+            loadSavedSchedule();
+            setIsUnlocked(true);
+            return;
+          }
+        } catch (getErr: any) {
+          console.warn('Face ID get() 인증 실패 또는 재등록 필요:', getErr);
+          if (getErr.name === 'NotAllowedError') {
+            // 사용자가 생체 인증 화면을 취소한 경우 리턴
+            return;
+          }
+          // 기기에서 패스키를 찾을 수 없거나 다른 기기일 경우 아래 create()로 재등록 시도
+        }
+      }
+
+      // 2. 최초 사용 시 또는 재등록: navigator.credentials.create() 호출 -> 실제 아이폰 Face ID 등록 팝업
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+
+      const credential = (await navigator.credentials.create({
+        publicKey: {
+          challenge,
+          rp: {
+            name: 'ER Schedule',
+            id: window.location.hostname,
+          },
+          user: {
+            id: Uint8Array.from('er-schedule-user-hyunwoo', c => c.charCodeAt(0)),
+            name: 'hyunwoo',
+            displayName: '박현우 (ER Schedule)',
+          },
+          pubKeyCredParams: [
+            { alg: -7, type: 'public-key' },   // ES256 (Apple Face ID 표준)
+            { alg: -257, type: 'public-key' },  // RS256
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: 'platform', // 아이폰 Face ID / Touch ID 강제
+            userVerification: 'required',
+            residentKey: 'preferred',
+          },
+          timeout: 60000,
+        },
+      })) as PublicKeyCredential | null;
+
+      if (credential) {
+        const rawIdBase64 = bufferToBase64(credential.rawId);
+        localStorage.setItem(STORAGE_WEBAUTHN_ID, rawIdBase64);
+        loadSavedSchedule();
+        setIsUnlocked(true);
+      }
+    } catch (err: any) {
+      console.error('Face ID WebAuthn 오류:', err);
+      if (err.name === 'NotAllowedError') {
+        // 사용자가 취소한 경우 조용히 리턴
+        return;
+      }
+      alert('Face ID 연동 중 오류가 발생했습니다. PIN 암호를 입력해 주세요. (HTTPS 환경 필요)');
+    }
   };
 
   // PIN 번호 확인
@@ -825,9 +923,6 @@ export default function ERSchedulePage() {
             <KeyRound className="w-3 h-3 text-yellow-400" />
             <span>비밀번호 변경</span>
           </button>
-          <div className="text-[10px] text-zinc-600">
-            기본 비밀번호: 1234
-          </div>
         </div>
 
         {/* 비밀번호 변경 팝업 모달 */}
@@ -1137,10 +1232,13 @@ export default function ERSchedulePage() {
                     // Slot 3: Night (N)
                     const nightShift = dayData?.shifts.find(s => s.code === 'N');
 
-                    // 근무조 렌더링 헬퍼 컴포넌트 (강제 한 줄 처리 + 현우 가운데 정렬 + 무채색화)
+                    // 근무조 렌더링 헬퍼 컴포넌트 (강제 한 줄 처리 + 현우 가운데 정렬 + 무채색화 + M1/M2는 M으로 표기)
                     const renderShiftSlot = (shift?: ShiftItem) => {
                       if (!shift) return null;
                       const hasHyunwoo = shift.hasTargetUser;
+
+                      // [요구사항 2]: 화면에는 M1, M2 대신 무조건 'M'으로 표기
+                      const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
 
                       // [요구사항 2 & 3]: 메인 달력 화면 - 다른 사람들은 무채색 통일, 현우는 노란색 + 가운데 정렬
                       let baseTheme = 'bg-zinc-900/90 border-zinc-800/80 text-zinc-400';
@@ -1157,10 +1255,10 @@ export default function ERSchedulePage() {
                       return (
                         <div
                           className={`flex items-center gap-1 px-1 py-0.5 rounded border leading-tight w-full transition-all overflow-hidden ${baseTheme} ${alignClass}`}
-                          title={`${shift.code} ${shift.workers.join(', ')}`}
+                          title={`${displayCode} ${shift.workers.join(', ')}`}
                         >
                           <span className={`shrink-0 ${codeTheme}`}>
-                            {shift.code}
+                            {displayCode}
                           </span>
                           {/* [요구사항 2]: text-[9px] truncate whitespace-nowrap overflow-hidden block w-full 강제 한 줄 처리 */}
                           <span className={`text-[9px] truncate whitespace-nowrap overflow-hidden block w-full no-underline ${alignClass}`}>
@@ -1261,9 +1359,6 @@ export default function ERSchedulePage() {
                       </span>
                     )}
                   </div>
-                  <span className="text-2xs text-zinc-400">
-                    {selectedDay.shifts.length}개 근무조 편성
-                  </span>
                 </div>
 
                 <button
@@ -1288,6 +1383,10 @@ export default function ERSchedulePage() {
                 {selectedDay.shifts.map((shift, idx) => {
                   const hasHyunwoo = shift.hasTargetUser;
 
+                  // [요구사항 2]: 화면에는 M1, M2 대신 무조건 'M'으로 표기
+                  const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
+                  const displayName = (shift.code === 'M1' || shift.code === 'M2') ? '미드' : shift.name;
+
                   // [요구사항 3]: 팝업(모달)에서도 다른 근무자들은 색상 없이 다크 모드 무채색으로 통일!
                   let cardTheme = 'bg-zinc-950/80 border-zinc-800 text-zinc-300';
                   let codeBadgeTheme = 'bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold';
@@ -1309,9 +1408,9 @@ export default function ERSchedulePage() {
                       <div className={`flex items-center mb-1.5 ${hasHyunwoo ? 'justify-center gap-3' : 'justify-between'}`}>
                         <div className="flex items-center gap-1.5 font-bold">
                           <span className={`px-1.5 py-0.2 rounded text-2xs font-black ${codeBadgeTheme}`}>
-                            {shift.code}
+                            {displayCode}
                           </span>
-                          <span className="font-extrabold">{shift.name}</span>
+                          <span className="font-extrabold">{displayName}</span>
                         </div>
                         <span className={`text-2xs ${hasHyunwoo ? 'text-black/80 font-bold' : 'text-zinc-400'}`}>
                           {shift.time}
