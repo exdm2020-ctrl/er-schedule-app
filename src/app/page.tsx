@@ -967,17 +967,58 @@ export default function ERSchedulePage() {
   }, [scheduleList, currentYear, currentMonth]);
 
   // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
+  // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
   const handleGoToCurrentMonth = () => {
     const today = new Date();
-    setCurrentYear(today.getFullYear());
-    setCurrentMonth(today.getMonth() + 1);
-    setViewMode('1month');
+    const curY = today.getFullYear();
+    const curM = today.getMonth() + 1;
+    setCurrentYear(curY);
+    setCurrentMonth(curM);
+    if (viewMode === '1year') {
+      setTimeout(() => {
+        const el = document.getElementById(`month-block-${curY}-${curM}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 50);
+    } else {
+      setViewMode('1month');
+    }
   };
 
-  // 월 / 연도 이동 (1M 모드일 땐 1달씩, 1Y 모드일 땐 1년씩)
+  // [핵심 1]: 1Y 연속 스크롤 모드로 전환할 때 화면 튐 없이 현재 보고 있던 달을 화면에 안정적으로 유지
+  const handleSwitchToYearView = () => {
+    const targetY = currentYear;
+    const targetM = currentMonth;
+    setViewMode('1year');
+
+    // 렌더링 후 현재 보고 있던 월 위치로 화면 튐 없이 자연스럽게 안착
+    setTimeout(() => {
+      const el = document.getElementById(`month-block-${targetY}-${targetM}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'auto', block: 'start' });
+      }
+    }, 20);
+  };
+
+  const handleSwitchToMonthView = () => {
+    setViewMode('1month');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // 월 / 연도 이동 (1M 모드일 땐 1달씩 상태 변경, 1Y 연속 스크롤 모드일 땐 이전/다음 달로 부드러운 스크롤 이동)
   const handlePrevMonth = () => {
     if (viewMode === '1year') {
-      setCurrentYear(prev => prev - 1);
+      const prevM = currentMonth > 1 ? currentMonth - 1 : 12;
+      const prevY = currentMonth > 1 ? currentYear : currentYear - 1;
+      if (prevY !== currentYear) {
+        setCurrentYear(prevY);
+      }
+      setCurrentMonth(prevM);
+      const el = document.getElementById(`month-block-${prevY}-${prevM}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     } else {
       const prev = new Date(currentYear, currentMonth - 1 - 1, 1);
       setCurrentYear(prev.getFullYear());
@@ -987,13 +1028,57 @@ export default function ERSchedulePage() {
 
   const handleNextMonth = () => {
     if (viewMode === '1year') {
-      setCurrentYear(next => next + 1);
+      const nextM = currentMonth < 12 ? currentMonth + 1 : 1;
+      const nextY = currentMonth < 12 ? currentYear : currentYear + 1;
+      if (nextY !== currentYear) {
+        setCurrentYear(nextY);
+      }
+      setCurrentMonth(nextM);
+      const el = document.getElementById(`month-block-${nextY}-${nextM}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     } else {
       const next = new Date(currentYear, currentMonth - 1 + 1, 1);
       setCurrentYear(next.getFullYear());
       setCurrentMonth(next.getMonth() + 1);
     }
   };
+
+  // [연속 스크롤 뷰 지원]: 1Y 모드에서 스크롤을 내릴 때 현재 뷰포트에 보이는 월을 실시간 감지하여 상단 헤더 및 통계 동기화
+  useEffect(() => {
+    if (viewMode !== '1year') return;
+
+    let timeoutId: NodeJS.Timeout;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.35) {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+              const id = entry.target.id;
+              const match = id.match(/month-block-(\d{4})-(\d{1,2})/);
+              if (match) {
+                const y = parseInt(match[1], 10);
+                const m = parseInt(match[2], 10);
+                setCurrentYear(y);
+                setCurrentMonth(m);
+              }
+            }, 80);
+          }
+        });
+      },
+      { threshold: [0.35, 0.6] }
+    );
+
+    const monthElements = document.querySelectorAll('[id^="month-block-"]');
+    monthElements.forEach((el) => observer.observe(el));
+
+    return () => {
+      clearTimeout(timeoutId);
+      observer.disconnect();
+    };
+  }, [viewMode, currentYear]);
 
   // [핵심 1]: 파일 업로드 및 로컬스토리지 영구 저장
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1034,7 +1119,7 @@ export default function ERSchedulePage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // [요구사항 2]: 렌더링할 월 배열 (1M: 1달, 1Y: 선택된 연도의 1월~12월 전체를 아래로 스크롤하여 조회)
+  // [요구사항 1]: 연속 스크롤 월간 뷰 - 1Y 모드일 때 해당 연도의 1월~12월을 세로로 차곡차곡 연속 렌더링
   const monthsToRender = useMemo(() => {
     if (viewMode === '1year') {
       const arr: { year: number; month: number }[] = [];
@@ -1415,7 +1500,7 @@ export default function ERSchedulePage() {
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode('1month')}
+                onClick={handleSwitchToMonthView}
                 className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95 ${
                   viewMode === '1month'
                     ? 'bg-zinc-800 text-yellow-400 shadow-sm'
@@ -1427,13 +1512,13 @@ export default function ERSchedulePage() {
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode('1year')}
+                onClick={handleSwitchToYearView}
                 className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95 ${
                   viewMode === '1year'
                     ? 'bg-zinc-800 text-yellow-400 shadow-sm'
                     : 'text-zinc-400 hover:text-zinc-200'
                 }`}
-                title="연간 전체 달력 스크롤 보기"
+                title="연간 연속 스크롤 달력 보기"
               >
                 1Y
               </button>
@@ -1466,24 +1551,29 @@ export default function ERSchedulePage() {
         </div>
 
         {/* ========================================================= */}
-        {/* 3. 달력 그리드 영역 (세로 여백 상향 조정으로 화면 상단 쪽에 안정감 있게 배치) */}
+        {/* 3. 달력 그리드 영역 (연속 스크롤 월간 뷰 지원) */}
         {/* ========================================================= */}
-        <main className="flex-1 p-2.5 pt-2 space-y-5 pb-safe">
+        <main className="flex-1 p-2.5 pt-2 space-y-6 pb-safe">
           {monthsToRender.map(({ year, month }) => {
             const ymStr = `${year}-${String(month).padStart(2, '0')}`;
             const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
             const daysInMonth = new Date(year, month, 0).getDate();
+            const isCurrentViewingMonth = year === currentYear && month === currentMonth;
 
             return (
-              <div key={ymStr} className="space-y-1">
-                {/* 다중 월 모드일 때 월 헤더 */}
-                {viewMode !== '1month' && (
-                  <div className="flex items-center justify-between px-1 pt-3 pb-1 border-b border-zinc-900/80 mb-1">
-                    <span className="text-sm font-black text-yellow-400 flex items-center gap-1.5">
-                      <CalendarIcon className="w-3.5 h-3.5" />
+              <div 
+                key={ymStr} 
+                id={`month-block-${year}-${month}`} 
+                className="space-y-1 scroll-mt-28 transition-all"
+              >
+                {/* 1Y 연속 스크롤 모드일 때 세련된 Sticky 월 구분 헤더 */}
+                {viewMode === '1year' && (
+                  <div className="sticky top-[108px] z-20 bg-zinc-950/95 backdrop-blur-md flex items-center justify-between px-2 py-2 border-b border-zinc-800/80 mb-1.5 rounded-lg shadow-sm">
+                    <span className={`text-sm font-black flex items-center gap-1.5 ${isCurrentViewingMonth ? 'text-yellow-400' : 'text-zinc-200'}`}>
+                      <CalendarIcon className="w-4 h-4 text-yellow-400" />
                       <span>{year}년 {month}월</span>
                     </span>
-                    <span className="text-2xs text-zinc-500 font-medium">
+                    <span className="text-2xs text-zinc-500 font-semibold bg-zinc-900 px-2 py-0.5 rounded-full border border-zinc-800">
                       {daysInMonth}일
                     </span>
                   </div>
