@@ -1162,16 +1162,6 @@ export default function ERSchedulePage() {
     return { total, dCount, mCount, nCount };
   }, [scheduleList, currentYear, currentMonth]);
 
-  // [오늘의 근무 위젯 카드용]: 오늘 날짜 데이터 및 현우 근무 추출
-  const todayDayData = useMemo(() => {
-    return scheduleMap.get(todayStr) || null;
-  }, [scheduleMap, todayStr]);
-
-  const todayHyunwooShift = useMemo(() => {
-    if (!todayDayData) return null;
-    return todayDayData.shifts.find(s => s.hasTargetUser) || null;
-  }, [todayDayData]);
-
   // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
   // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
   const handleGoToCurrentMonth = () => {
@@ -2320,52 +2310,7 @@ export default function ERSchedulePage() {
         {/* ========================================================= */}
         {/* 3. 달력 그리드 영역 (연속 스크롤 월간 뷰 지원) */}
         {/* ========================================================= */}
-        <main className="flex-1 p-2.5 pt-2 space-y-4 pb-safe">
-          {/* 🌟 오늘의 근무 위젯 카드 (애플 위젯 스타일) */}
-          <div 
-            onClick={() => todayDayData && setSelectedDay(todayDayData)}
-            className="p-3 rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-900/90 to-zinc-800/80 border border-zinc-700/80 shadow-md hover:border-yellow-400/60 transition-all cursor-pointer group active:scale-[0.99] mb-2"
-            title="오늘의 상세 근무 확인 및 수정"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-yellow-400/20 border border-yellow-400/40 flex items-center justify-center text-yellow-400 shrink-0 shadow-xs">
-                  <Sparkles className="w-4 h-4 fill-yellow-400" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs font-black text-white">오늘의 근무</span>
-                    <span className="text-[9px] font-black text-emerald-950 bg-emerald-400 px-1.5 py-0.2 rounded-full">
-                      {todayStr}
-                    </span>
-                    {todayDayData?.holidayNote && (
-                      <span className="text-[9px] font-bold text-rose-400 bg-rose-950/80 px-1.5 py-0.2 rounded-full border border-rose-900 truncate max-w-[120px]">
-                        {todayDayData.holidayNote}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-zinc-300 mt-0.5 truncate">
-                    {todayHyunwooShift ? (
-                      <span className="text-yellow-400 font-extrabold flex items-center gap-1">
-                        <span>현우 {todayHyunwooShift.name}({todayHyunwooShift.code}) 당직</span>
-                        <span className="text-zinc-400 font-normal">({todayHyunwooShift.time})</span>
-                      </span>
-                    ) : (
-                      <span className="text-emerald-400 font-bold flex items-center gap-1">
-                        <span>오늘 현우 당직 없음 (OFF)</span>
-                        <span className="text-zinc-400 font-normal">· 편안한 휴식일 ✨</span>
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              <div className="shrink-0 flex items-center gap-1 text-zinc-400 group-hover:text-yellow-400 transition-colors pl-2">
-                <span className="text-[10px] font-bold hidden sm:inline">상세보기</span>
-                <ChevronRight className="w-4 h-4" />
-              </div>
-            </div>
-          </div>
+        <main className="flex-1 p-2.5 pt-2 space-y-6 pb-safe">
           {monthsToRender.map(({ year, month }) => {
             const ymStr = `${year}-${String(month).padStart(2, '0')}`;
             const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
