@@ -3595,7 +3595,7 @@ function getShiftTimeText(shiftCode: ShiftCode, isWeekendOrHoliday: boolean): st
           <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/85 backdrop-blur-xs animate-in fade-in duration-150">
             <div className="absolute inset-0" onClick={() => setIsWidgetModalOpen(false)} />
 
-            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3 z-10 text-zinc-100 max-h-[95vh] flex flex-col">
+            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3 z-10 text-zinc-100 max-h-[96vh] overflow-y-auto flex flex-col">
               {/* 상단 헤더 */}
               <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 shrink-0">
                 <div className="flex items-center gap-1.5">
@@ -3681,20 +3681,20 @@ function getShiftTimeText(shiftCode: ShiftCode, isWeekendOrHoliday: boolean): st
                   <button
                     type="button"
                     onClick={() => handleSaveToPhotosAction('name')}
-                    className="w-full py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+                    className="w-full py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
                   >
                     <Download className="w-4 h-4 text-black" />
-                    <span>📸 [기본 위젯 이미지 저장] (이름 표기)</span>
+                    <span>📸 [기본 위젯 이미지 저장]</span>
                   </button>
 
                   {/* 2) [근무 시간 위젯 이미지 저장] */}
                   <button
                     type="button"
                     onClick={() => handleSaveToPhotosAction('time')}
-                    className="w-full py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 active:scale-98 text-emerald-950 font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+                    className="w-full py-2.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 active:scale-98 text-emerald-950 font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
                   >
                     <Download className="w-4 h-4 text-emerald-950" />
-                    <span>⏰ [근무 시간 위젯 이미지 저장] (출근시간 표기)</span>
+                    <span>⏰ [근무 시간 위젯 이미지 저장]</span>
                   </button>
                 </div>
 
