@@ -2032,7 +2032,7 @@ export default function ERSchedulePage() {
       ctx.stroke();
     };
 
-    // 슬롯 뱃지 그리기 (4구역 100% 동일 폰트 크기 + 완벽한 정중앙 정렬 + Max-scale 오토피팅)
+    // 슬롯 뱃지 그리기 (4구역 100% 동일 폰트 규격 + 최고 볼드 900 + 완벽한 정중앙 대칭 정렬 + Max-scale 오토피팅)
     const drawShiftSlotBadge = (
       shift: ShiftItem,
       bX: number,
@@ -2042,16 +2042,16 @@ export default function ERSchedulePage() {
     ) => {
       const hasHyunwoo = shift.hasTargetUser;
       const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
-      // D, H, M, N 모든 구역이 완전히 동일한 높이(bH)를 공유하므로 폰트 크기도 100% 균등하게 통일!
-      const baseFontSize = Math.min(18.5, Math.max(14.5, bH * 0.45));
+      // [4구역 완벽 규격 통일]: D, M1(H), M2(M), N 모든 슬롯이 100% 동일한 높이(bH)와 패딩, 폰트 크기를 완벽하게 공유!
+      const baseFontSize = Math.min(19, Math.max(15, bH * 0.48));
       const badgeRadius = 5;
 
       let namesText = shift.workers.join('/');
       let currentSize = baseFontSize;
-      const minSize = 11;
+      const minSize = 11.5;
       const maxTextW = bW - 10;
 
-      // 텍스트 너비 오토피팅 계산 (최적 한계치 Max-scale)
+      // 텍스트 너비 오토피팅 계산 (텍스트 잘림 없는 한계치 Max-scale 볼드 900)
       ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
       const codeStr = displayCode + ' ';
       let combinedStr = `${codeStr}${namesText}`;
@@ -2073,7 +2073,7 @@ export default function ERSchedulePage() {
       const centerY = bY + (bH / 2);
 
       if (hasHyunwoo) {
-        // [현우 근무일]: 선명한 노란색(#fde047) 배경 + 칠흑 검정 볼드 + 정중앙 정렬
+        // [현우 근무일]: 선명한 노란색(#fde047) 배경 + 칠흑 검정 최고 볼드 900 + 정중앙 정렬
         ctx.fillStyle = '#fde047';
         drawRoundRect(ctx, bX, bY, bW, bH, badgeRadius);
         ctx.fill();
@@ -2087,7 +2087,7 @@ export default function ERSchedulePage() {
         ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
         ctx.fillText(combinedStr, bX + (bW / 2), centerY);
       } else {
-        // [타인 근무]: 다크 그레이 배경 + 코드(슬레이트) & 근무자 이름(화이트) + 정중앙 대칭 정렬
+        // [타인 근무]: 다크 그레이 배경 + 코드(슬레이트) & 근무자 이름(화이트) + 최고 볼드 900 완벽 통일 + 정중앙 대칭 정렬
         ctx.fillStyle = '#1e1e24';
         drawRoundRect(ctx, bX, bY, bW, bH, badgeRadius);
         ctx.fill();
@@ -2098,15 +2098,15 @@ export default function ERSchedulePage() {
         ctx.textBaseline = 'middle';
         const startX = bX + Math.max(3, (bW - totalContentW) / 2);
 
-        // 1) 근무 코드
+        // 1) 근무 코드 (D, H, M, N 모두 볼드 900)
         ctx.textAlign = 'left';
         ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
         ctx.fillStyle = '#94a3b8';
         ctx.fillText(codeStr, startX, centerY);
         const codeW = ctx.measureText(codeStr).width;
 
-        // 2) 근무자 이름 (동일한 크기 + 선명한 화이트)
-        ctx.font = `800 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+        // 2) 근무자 이름 (4구역 모두 동일한 볼드 900 + 선명한 화이트)
+        ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
         ctx.fillStyle = '#ffffff';
         ctx.fillText(namesText, startX + codeW, centerY);
       }
