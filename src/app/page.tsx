@@ -1104,7 +1104,9 @@ export default function ERSchedulePage() {
   // [1:1 정방형 위젯용 이미지 상태]
   const [isWidgetModalOpen, setIsWidgetModalOpen] = useState<boolean>(false);
   const [widgetImageUrl, setWidgetImageUrl] = useState<string | null>(null);
+  const [widgetImageFile, setWidgetImageFile] = useState<File | null>(null);
   const [isGeneratingWidget, setIsGeneratingWidget] = useState<boolean>(false);
+  const [saveToPhotosFeedback, setSaveToPhotosFeedback] = useState<string | null>(null);
 
   // [요구사항 2]: 오늘 날짜(YYYY-MM-DD) 추출 - 1년치 스크롤에서도 오늘 위치를 즉각 식별
   const todayStr = useMemo(() => {
@@ -1910,43 +1912,33 @@ export default function ERSchedulePage() {
     if (e.target) e.target.value = '';
   };
 
-  // [위젯 이미지 생성 함수]: 1:1 정방형 (1080x1080) 고해상도 캘린더 위젯 PNG 렌더링
-  const generateSquareWidgetImage = async (year: number, month: number): Promise<string | null> => {
+  // [위젯 이미지 생성 함수]: 1:1 정방형 (1200x1200) 초고해상도 캘린더 위젯 PNG 렌더링
+  // 원본 달력과 100% 동일한 3-Slot Grid (D / M,H / N) 구성 및 현우 노란색 하이라이트 복제
+  const generateSquareWidgetImage = async (year: number, month: number): Promise<{ dataUrl: string; file: File } | null> => {
     if (typeof window === 'undefined') return null;
 
     const canvas = document.createElement('canvas');
-    canvas.width = 1080;
-    canvas.height = 1080;
+    canvas.width = 1200;
+    canvas.height = 1200;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    // 1. 배경 채우기 (다크모드 딥 블랙 #09090b)
+    // 1. 전체 배경 채우기 (다크모드 딥 블랙 #09090b)
     ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, 1080, 1080);
+    ctx.fillRect(0, 0, 1200, 1200);
 
-    // 상단 은은한 앰비언트 글로우
-    const bgGrad = ctx.createLinearGradient(0, 0, 1080, 220);
-    bgGrad.addColorStop(0, 'rgba(250, 204, 21, 0.08)');
-    bgGrad.addColorStop(1, 'rgba(9, 9, 11, 0)');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, 1080, 220);
-
-    // 2. 상단 헤더
-    ctx.fillStyle = '#71717a';
-    ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('EMERGENCY ROOM SCHEDULE', 54, 44);
-
-    // "YYYY년 M월" 메인 타이틀
+    // 2. 상단 헤더: 해당 스케줄 해당 월 ("YYYY년 M월")
     ctx.fillStyle = '#ffffff';
-    ctx.font = '900 46px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
-    ctx.fillText(`${year}년 ${month}월`, 54, 74);
+    ctx.font = '900 42px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${year}년 ${month}월`, 36, 52);
 
-    // 현우 이번 달 통계 뱃지
+    // 현우 이번 달 당직 통계 미니 뱃지
     const ymPrefix = `${year}-${String(month).padStart(2, '0')}`;
     let mTotal = 0;
     let mD = 0;
+    let mH = 0;
     let mM = 0;
     let mN = 0;
     scheduleList.forEach(item => {
@@ -1955,6 +1947,7 @@ export default function ERSchedulePage() {
         item.shifts.forEach(s => {
           if (s.hasTargetUser) {
             if (s.code === 'D') mD++;
+            else if (s.code === 'H') mH++;
             else if (s.code === 'N') mN++;
             else mM++;
           }
@@ -1962,11 +1955,14 @@ export default function ERSchedulePage() {
       }
     });
 
-    const badgeStatsText = `현우 당직 ${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`;
-    ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
-    const badgeW = ctx.measureText(badgeStatsText).width + 36;
-    const badgeX = 1080 - 54 - badgeW;
-    const badgeY = 72;
+    const badgeStatsText = mH > 0
+      ? `현우 당직 ${mTotal}회 (D ${mD} · H ${mH} · M ${mM} · N ${mN})`
+      : `현우 당직 ${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`;
+
+    ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    const badgeW = ctx.measureText(badgeStatsText).width + 32;
+    const badgeX = 1200 - 36 - badgeW;
+    const badgeY = 30;
 
     ctx.fillStyle = '#18181b';
     drawRoundRect(ctx, badgeX, badgeY, badgeW, 44, 12);
@@ -1975,21 +1971,27 @@ export default function ERSchedulePage() {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fde047';
-    ctx.fillText('현우 당직 ', badgeX + 18, badgeY + 12);
+    ctx.fillText('현우 당직 ', badgeX + 16, badgeY + 22);
     const hyunwooW = ctx.measureText('현우 당직 ').width;
     ctx.fillStyle = '#e4e4e7';
-    ctx.fillText(`${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`, badgeX + 18 + hyunwooW, badgeY + 12);
+    const restText = mH > 0
+      ? `${mTotal}회 (D ${mD} · H ${mH} · M ${mM} · N ${mN})`
+      : `${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`;
+    ctx.fillText(restText, badgeX + 16 + hyunwooW, badgeY + 22);
 
-    // 3. 요일 헤더 행
+    // 3. 요일 헤더 행 (일 ~ 토)
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    const gridLeft = 44;
-    const gridWidth = 1080 - (gridLeft * 2);
+    const gridLeft = 32;
+    const gridWidth = 1200 - (gridLeft * 2);
     const colWidth = gridWidth / 7;
-    const dayHeaderY = 144;
+    const dayHeaderY = 108;
 
     ctx.font = 'bold 22px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     dayNames.forEach((dName, colIdx) => {
       const colX = gridLeft + (colIdx * colWidth) + (colWidth / 2);
       if (colIdx === 0) ctx.fillStyle = '#ef4444';
@@ -1998,26 +2000,99 @@ export default function ERSchedulePage() {
       ctx.fillText(dName, colX, dayHeaderY);
     });
 
+    // 구분선
     ctx.strokeStyle = '#27272a';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(gridLeft, dayHeaderY + 34);
-    ctx.lineTo(gridLeft + gridWidth, dayHeaderY + 34);
+    ctx.moveTo(gridLeft, dayHeaderY + 22);
+    ctx.lineTo(gridLeft + gridWidth, dayHeaderY + 22);
     ctx.stroke();
 
-    // 4. 날짜 그리드
+    // 4. 날짜 그리드 계산
     const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
     const daysInMonth = new Date(year, month, 0).getDate();
     const totalSlots = firstDayOfWeek + daysInMonth;
     const numRows = Math.ceil(totalSlots / 7);
 
-    const gridTopY = dayHeaderY + 44;
-    const availableGridHeight = 1080 - gridTopY - 36;
+    const gridTopY = dayHeaderY + 32;
+    const availableGridHeight = 1200 - gridTopY - 24;
     const rowHeight = availableGridHeight / numRows;
-    const cellGap = 6;
+    const cellGap = 5;
 
     const realToday = new Date();
     const realTodayStr = normalizeDateKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
+
+    // 슬롯 뱃지 그리기 내부 헬퍼 (원본 renderShiftSlot과 100% 동일한 룰)
+    const drawShiftSlotBadge = (
+      shift: ShiftItem,
+      bX: number,
+      bY: number,
+      bW: number,
+      bH: number
+    ) => {
+      const hasHyunwoo = shift.hasTargetUser;
+      const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
+
+      if (hasHyunwoo) {
+        // [현우 근무일]: 선명한 노란색(#fde047) 배경 + 칠흑 검정 볼드 + 가운데 정렬
+        ctx.fillStyle = '#fde047';
+        drawRoundRect(ctx, bX, bY, bW, bH, 5);
+        ctx.fill();
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '900 12px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+        ctx.fillStyle = '#000000';
+
+        let textContent = `${displayCode} ${shift.workers.join('/')}`;
+        if (ctx.measureText(textContent).width > bW - 8) {
+          ctx.font = '900 10.5px -apple-system, sans-serif';
+          if (ctx.measureText(textContent).width > bW - 6) {
+            while (textContent.length > 3 && ctx.measureText(textContent + '..').width > bW - 6) {
+              textContent = textContent.slice(0, -1);
+            }
+            textContent += '..';
+          }
+        }
+        ctx.fillText(textContent, bX + (bW / 2), bY + (bH / 2));
+      } else {
+        // [타인 근무]: 다크 그레이 배경 + 코드/근무자 무채색
+        ctx.fillStyle = '#222226';
+        drawRoundRect(ctx, bX, bY, bW, bH, 5);
+        ctx.fill();
+        ctx.strokeStyle = '#323238';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+
+        // 코드
+        ctx.fillStyle = '#71717a';
+        ctx.fillText(displayCode, bX + 6, bY + (bH / 2));
+        const codeW = ctx.measureText(displayCode + ' ').width;
+
+        // 근무자들
+        ctx.fillStyle = '#d4d4d8';
+        ctx.font = '600 11px -apple-system, sans-serif';
+        let namesText = shift.workers.join('/');
+        const maxNamesW = bW - 12 - codeW;
+        if (ctx.measureText(namesText).width > maxNamesW) {
+          ctx.font = '600 9.5px -apple-system, sans-serif';
+          if (ctx.measureText(namesText).width > maxNamesW) {
+            while (namesText.length > 2 && ctx.measureText(namesText + '..').width > maxNamesW) {
+              namesText = namesText.slice(0, -1);
+            }
+            namesText += '..';
+          }
+        }
+        ctx.fillText(namesText, bX + 6 + codeW, bY + (bH / 2));
+      }
+    };
 
     for (let r = 0; r < numRows; r++) {
       for (let c = 0; c < 7; c++) {
@@ -2031,8 +2106,8 @@ export default function ERSchedulePage() {
         const cellH = rowHeight - cellGap;
 
         if (!isValidDay) {
-          ctx.fillStyle = 'rgba(24, 24, 27, 0.3)';
-          drawRoundRect(ctx, cellX, cellY, cellW, cellH, 10);
+          ctx.fillStyle = 'rgba(24, 24, 27, 0.25)';
+          drawRoundRect(ctx, cellX, cellY, cellW, cellH, 8);
           ctx.fill();
           continue;
         }
@@ -2046,18 +2121,18 @@ export default function ERSchedulePage() {
         const hasTargetUser = Boolean(dayData?.hasTargetUser);
 
         // 셀 배경
-        ctx.fillStyle = '#18181b';
-        drawRoundRect(ctx, cellX, cellY, cellW, cellH, 10);
+        ctx.fillStyle = '#161618';
+        drawRoundRect(ctx, cellX, cellY, cellW, cellH, 8);
         ctx.fill();
 
-        // 셀 테두리
+        // 셀 테두리 (오늘 초록 / 현우 노랑 / 일반 다크)
         if (isToday) {
-          ctx.strokeStyle = '#10b981'; // 쨍한 초록색 테두리
-          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#10b981'; // 선명한 에메랄드 초록
+          ctx.lineWidth = 3.5;
           ctx.stroke();
         } else if (hasTargetUser) {
-          ctx.strokeStyle = '#eab308'; // 노란색 테두리
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = '#facc15'; // 선명한 골드 노랑
+          ctx.lineWidth = 2;
           ctx.stroke();
         } else {
           ctx.strokeStyle = '#27272a';
@@ -2065,7 +2140,7 @@ export default function ERSchedulePage() {
           ctx.stroke();
         }
 
-        // 날짜 숫자
+        // 1) 날짜 숫자
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.font = '900 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
@@ -2073,116 +2148,158 @@ export default function ERSchedulePage() {
         if (isToday) ctx.fillStyle = '#34d399';
         else if (isSunday || isHoliday) ctx.fillStyle = '#f87171';
         else if (isSaturday) ctx.fillStyle = '#38bdf8';
-        else ctx.fillStyle = '#e4e4e7';
+        else ctx.fillStyle = '#f4f4f5';
 
-        ctx.fillText(String(dayNum), cellX + 8, cellY + 6);
+        ctx.fillText(String(dayNum), cellX + 7, cellY + 6);
+        const dayNumW = ctx.measureText(String(dayNum)).width;
 
         // 오늘 뱃지
         if (isToday) {
           ctx.fillStyle = '#10b981';
-          drawRoundRect(ctx, cellX + 34, cellY + 6, 32, 16, 4);
+          drawRoundRect(ctx, cellX + 9 + dayNumW, cellY + 6, 28, 16, 4);
           ctx.fill();
           ctx.fillStyle = '#022c22';
-          ctx.font = '900 10px sans-serif';
-          ctx.fillText('오늘', cellX + 38, cellY + 8);
-        }
-
-        // 공휴일 메모
-        if (dayData?.holidayNote) {
-          ctx.fillStyle = '#f87171';
-          ctx.font = 'bold 11px -apple-system, sans-serif';
-          const noteStr = dayData.holidayNote.length > 5 ? dayData.holidayNote.slice(0, 5) + '..' : dayData.holidayNote;
-          ctx.fillText(noteStr, cellX + 8, cellY + 28);
-        }
-
-        // 근무조 렌더링
-        const shifts = dayData?.shifts || [];
-        const shiftStartY = cellY + 36;
-        const shiftMaxDisplay = numRows >= 6 ? 2 : 3;
-        const shiftHeight = (cellH - 42) / shiftMaxDisplay;
-
-        shifts.slice(0, shiftMaxDisplay).forEach((shift, sIdx) => {
-          const sY = shiftStartY + (sIdx * shiftHeight);
-          const sH = shiftHeight - 3;
-          const hasHyunwoo = shift.hasTargetUser;
-          const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
-
-          // 박스 배경
-          if (hasHyunwoo) {
-            ctx.fillStyle = '#fde047'; // 현우 노란색
-            drawRoundRect(ctx, cellX + 5, sY, cellW - 10, sH, 5);
-            ctx.fill();
-          } else {
-            ctx.fillStyle = '#27272a'; // 타인 무채색
-            drawRoundRect(ctx, cellX + 5, sY, cellW - 10, sH, 5);
-            ctx.fill();
-          }
-
-          // 박스 텍스트
+          ctx.font = '900 9.5px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.font = hasHyunwoo
-            ? '900 12px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif'
-            : '600 11px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+          ctx.fillText('오늘', cellX + 9 + dayNumW + 14, cellY + 14);
+        }
 
-          ctx.fillStyle = hasHyunwoo ? '#000000' : '#a1a1aa';
-          const textContent = `${displayCode} ${shift.workers.join('/')}`;
-          const maxTextW = cellW - 14;
-          let renderedText = textContent;
-          if (ctx.measureText(renderedText).width > maxTextW) {
-            while (renderedText.length > 3 && ctx.measureText(renderedText + '..').width > maxTextW) {
-              renderedText = renderedText.slice(0, -1);
-            }
-            renderedText += '..';
-          }
-          ctx.fillText(renderedText, cellX + (cellW / 2), sY + (sH / 2));
-        });
+        // 공휴일 메모 (우측 상단 뱃지)
+        if (dayData?.holidayNote) {
+          ctx.font = 'bold 10px -apple-system, sans-serif';
+          const noteText = dayData.holidayNote.length > 5 ? dayData.holidayNote.slice(0, 4) + '..' : dayData.holidayNote;
+          const noteW = ctx.measureText(noteText).width + 8;
+          const noteX = cellX + cellW - noteW - 6;
+
+          ctx.fillStyle = 'rgba(69, 10, 10, 0.85)';
+          drawRoundRect(ctx, noteX, cellY + 6, noteW, 16, 4);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(225, 29, 72, 0.4)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = '#f87171';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(noteText, noteX + (noteW / 2), cellY + 14);
+        }
+
+        // 2) [달력 줄맞춤 강제 3-Row Grid 슬롯]
+        const dayShift = dayData?.shifts.find(s => s.code === 'D');
+        const midShifts = dayData?.shifts.filter(s => s.code === 'M1' || s.code === 'M2' || s.code === 'M' || s.code === 'H') || [];
+        const nightShift = dayData?.shifts.find(s => s.code === 'N');
+
+        const slotsStartY = cellY + 28;
+        const availableSlotsH = cellH - 34;
+        const slotH = availableSlotsH / 3;
+        const badgeW = cellW - 8;
+        const badgeX = cellX + 4;
+
+        // Slot 1: Day (D)
+        const slot1Y = slotsStartY + 2;
+        const slot1H = slotH - 4;
+        if (dayShift) {
+          drawShiftSlotBadge(dayShift, badgeX, slot1Y, badgeW, slot1H);
+        }
+
+        // Slot 2: Mid / Helper (M, H, M1, M2)
+        const slot2Y = slotsStartY + slotH + 2;
+        const slot2H = slotH - 4;
+        if (midShifts.length === 1) {
+          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, slot2H);
+        } else if (midShifts.length >= 2) {
+          // 주말/공휴일 헬퍼(H)와 미드(M) 2개가 함께 있는 경우: 위아래로 깔끔히 2분할
+          const subH = (slot2H - 2) / 2;
+          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, subH);
+          drawShiftSlotBadge(midShifts[1], badgeX, slot2Y + subH + 2, badgeW, subH);
+        }
+
+        // Slot 3: Night (N)
+        const slot3Y = slotsStartY + (slotH * 2) + 2;
+        const slot3H = slotH - 4;
+        if (nightShift) {
+          drawShiftSlotBadge(nightShift, badgeX, slot3Y, badgeW, slot3H);
+        }
       }
     }
 
-    return canvas.toDataURL('image/png');
+    // Blob 및 File 객체 생성
+    const dataUrl = canvas.toDataURL('image/png');
+    const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) return null;
+
+    const file = new File([blob], `ER_Schedule_${year}년_${month}월_스케줄.png`, { type: 'image/png' });
+    return { dataUrl, file };
   };
 
-  // [위젯용 이미지 저장 핸들러]: 1:1 정방형 렌더링 실행 후 다운로드 및 iOS 공유 지원
+  // [위젯용 이미지 생성 및 모달 오픈 핸들러]
   const handleCreateWidgetImage = async () => {
     setIsGeneratingWidget(true);
+    setSaveToPhotosFeedback(null);
     try {
-      const dataUrl = await generateSquareWidgetImage(currentYear, currentMonth);
-      if (!dataUrl) {
+      const result = await generateSquareWidgetImage(currentYear, currentMonth);
+      if (!result) {
         alert('이미지 생성에 실패했습니다.');
         return;
       }
-      setWidgetImageUrl(dataUrl);
+      setWidgetImageUrl(result.dataUrl);
+      setWidgetImageFile(result.file);
       setIsWidgetModalOpen(true);
-
-      // 자동 다운로드 시도 (PC/일반 브라우저용)
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.href = dataUrl;
-      downloadAnchor.download = `ER_Schedule_${currentYear}_${String(currentMonth).padStart(2, '0')}_Widget.png`;
-      downloadAnchor.click();
-      downloadAnchor.remove();
-
-      // Web Share API가 지원되고 파일 공유가 가능한 경우 iOS 사진첩 저장으로 바로 안내
-      if (typeof navigator !== 'undefined' && navigator.canShare) {
-        try {
-          const res = await fetch(dataUrl);
-          const blob = await res.blob();
-          const file = new File([blob], `ER_Schedule_${currentYear}_${currentMonth}_Widget.png`, { type: 'image/png' });
-          if (navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              files: [file],
-              title: `${currentYear}년 ${currentMonth}월 ER 위젯 스케줄`,
-            });
-          }
-        } catch (shareErr: any) {
-          console.log('Share dismissed or not available:', shareErr);
-        }
-      }
     } catch (err) {
       console.error('Widget image generation error:', err);
       alert('위젯 이미지 생성 중 오류가 발생했습니다.');
     } finally {
       setIsGeneratingWidget(false);
+    }
+  };
+
+  // [사진첩에 이미지 저장 핸들러]: 사용자 터치 즉시 실행되어 iOS Share Sheet가 100% 정상 발동
+  const handleSaveToPhotosAction = async () => {
+    if (!widgetImageFile || !widgetImageUrl) return;
+
+    // 1) iOS Safari / PWA Web Share 지원 시: 시스템 공유창을 띄워 [이미지 저장]을 누르면 사진첩에 즉시 저장
+    if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
+      try {
+        if (navigator.canShare({ files: [widgetImageFile] })) {
+          await navigator.share({
+            files: [widgetImageFile],
+            title: `${currentYear}년 ${currentMonth}월 ER 스케줄`,
+          });
+          setSaveToPhotosFeedback('공유 창에서 [이미지 저장]을 탭하시면 사진첩에 저장됩니다.');
+          return;
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') return; // 사용자가 창을 닫은 경우
+        console.warn('Share error:', err);
+      }
+    }
+
+    // 2) 일반 PC / 안드로이드 브라우저: 즉시 고화질 다운로드 실행
+    try {
+      const a = document.createElement('a');
+      a.href = widgetImageUrl;
+      a.download = `ER_Schedule_${currentYear}년_${currentMonth}월_스케줄.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setSaveToPhotosFeedback('이미지가 다운로드되었습니다. 갤러리/사진첩에서 확인하세요.');
+    } catch (e) {
+      console.error('Download error:', e);
+    }
+  };
+
+  // [클립보드에 이미지 복사]
+  const handleCopyWidgetImageToClipboard = async () => {
+    if (!widgetImageFile) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': widgetImageFile })
+      ]);
+      setSaveToPhotosFeedback('이미지가 클립보드에 복사되었습니다! 카카오톡이나 메모장에 붙여넣기 하실 수 있습니다.');
+    } catch (err) {
+      console.warn('Clipboard copy failed:', err);
+      alert('클립보드 이미지 복사를 지원하지 않는 브라우저입니다.');
     }
   };
 
@@ -3392,58 +3509,97 @@ export default function ERSchedulePage() {
         {/* 7. 1:1 정방형 위젯용 이미지 미리보기 & 저장 모달 */}
         {/* ========================================================= */}
         {isWidgetModalOpen && widgetImageUrl && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 bg-black/85 backdrop-blur-xs animate-in fade-in duration-150">
             <div className="absolute inset-0" onClick={() => setIsWidgetModalOpen(false)} />
 
-            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-4 z-10 text-zinc-100 max-h-[92vh] flex flex-col">
-              <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 shrink-0">
-                <div className="flex items-center gap-2">
-                  <ImageIcon className="w-5 h-5 text-yellow-400" />
-                  <h3 className="text-sm font-extrabold text-white">1:1 정방형 위젯 이미지</h3>
+            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3.5 z-10 text-zinc-100 max-h-[94vh] flex flex-col">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-800 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <ImageIcon className="w-4 h-4 text-yellow-400" />
+                  <h3 className="text-xs font-black text-white">{currentYear}년 {currentMonth}월 1:1 위젯 스케줄</h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setIsWidgetModalOpen(false)}
                   className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
+              {/* 저장/공유 성공 피드백 알림 배너 */}
+              {saveToPhotosFeedback && (
+                <div className="mt-2 p-2 bg-emerald-950/90 border border-emerald-500/80 rounded-xl flex items-center gap-1.5 text-emerald-300 text-2xs font-extrabold animate-in fade-in shrink-0">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>{saveToPhotosFeedback}</span>
+                </div>
+              )}
+
               {/* 1:1 정방형 렌더링 이미지 미리보기 프레임 */}
-              <div className="mt-3 relative aspect-square w-full rounded-xl overflow-hidden border border-zinc-700 bg-zinc-950 shadow-inner flex items-center justify-center">
+              <div className="mt-2.5 relative aspect-square w-full rounded-xl overflow-hidden border border-zinc-700 bg-zinc-950 shadow-inner flex items-center justify-center shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={widgetImageUrl}
                   alt={`${currentYear}년 ${currentMonth}월 1:1 위젯 스케줄`}
-                  className="w-full h-full object-contain select-none"
+                  className="w-full h-full object-contain select-none cursor-pointer"
+                  onClick={handleSaveToPhotosAction}
+                  title="탭하여 사진첩에 저장하거나 길게 눌러 저장"
                 />
               </div>
 
-              <div className="mt-2.5 p-2 bg-zinc-950/80 rounded-xl border border-zinc-800 text-[11px] text-zinc-400 space-y-0.5">
-                <p className="text-yellow-400 font-bold flex items-center gap-1">
-                  <span>💡 아이폰 사진첩 저장 팁:</span>
+              {/* 아이폰 사진첩 바로 저장 안내 박스 */}
+              <div className="mt-2 p-2 bg-zinc-950/90 rounded-xl border border-zinc-800/90 text-2xs text-zinc-400 space-y-1">
+                <p className="text-yellow-400 font-extrabold flex items-center gap-1">
+                  <span>📱 아이폰 사진첩(사진 앱) 바로 저장 방법:</span>
                 </p>
-                <p>• 위 이미지를 <b className="text-zinc-200">1~2초간 꾹 길게 눌러</b> &apos;사진 앱에 저장&apos;을 누르세요.</p>
-                <p>• 다운로드가 지원되는 기기에서는 사진첩에 자동 저장되었습니다.</p>
-                <p>• 아이폰 홈 화면의 <b className="text-white">포토 위젯(Square)</b>에 지정하시면 매일 아름답게 표시됩니다.</p>
+                <p className="leading-snug">
+                  1. 아래 <b className="text-yellow-300">[📸 사진첩에 이미지 저장]</b> 버튼을 누르면 공유 창이 열립니다. <b className="text-white">&apos;이미지 저장&apos;</b>을 탭하세요.
+                </p>
+                <p className="leading-snug">
+                  2. 또는 위 이미지를 <b className="text-white">1초간 꾹 길게 눌러</b> <b className="text-yellow-300">&apos;사진에 저장&apos;</b>을 탭하셔도 사진첩에 바로 저장됩니다.
+                </p>
               </div>
 
-              <div className="mt-3 pt-2 border-t border-zinc-800 flex gap-2 shrink-0">
-                <a
-                  href={widgetImageUrl}
-                  download={`ER_Schedule_${currentYear}_${String(currentMonth).padStart(2, '0')}_Widget.png`}
-                  className="flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-98"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>이미지 파일 다운로드</span>
-                </a>
+              {/* 하단 액션 버튼 그룹 */}
+              <div className="mt-2.5 pt-2 border-t border-zinc-800 flex flex-col gap-1.5 shrink-0">
+                {/* 메인: 사진첩 저장 버튼 */}
                 <button
                   type="button"
-                  onClick={() => setIsWidgetModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
+                  onClick={handleSaveToPhotosAction}
+                  className="w-full py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
                 >
-                  닫기
+                  <Download className="w-4 h-4" />
+                  <span>📸 사진첩에 이미지 저장 (공유 시트)</span>
                 </button>
+
+                {/* 보조: 파일 직접 다운로드 및 클립보드 복사 */}
+                <div className="flex gap-1.5 w-full">
+                  <a
+                    href={widgetImageUrl}
+                    download={`ER_Schedule_${currentYear}년_${currentMonth}월_위젯.png`}
+                    className="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-2xs flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <Download className="w-3 h-3 text-sky-400" />
+                    <span>파일 다운로드</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyWidgetImageToClipboard}
+                    className="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-2xs flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <Copy className="w-3 h-3 text-amber-400" />
+                    <span>이미지 복사</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsWidgetModalOpen(false)}
+                    className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white font-bold text-2xs transition-colors"
+                  >
+                    닫기
+                  </button>
+                </div>
               </div>
             </div>
           </div>
