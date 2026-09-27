@@ -25,7 +25,8 @@ import {
   Link as LinkIcon,
   Download,
   RefreshCw,
-  Copy
+  Copy,
+  Image as ImageIcon
 } from 'lucide-react';
 
 const FULL_BLEED_ICON_SVG =
@@ -116,6 +117,26 @@ function base64ToBuffer(base64: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+// 캔버스 둥근 모서리 사각형 그리기 헬퍼
+function drawRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  if (w < 2 * r) r = w / 2;
+  if (h < 2 * r) r = h / 2;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 // ==========================================
@@ -733,6 +754,11 @@ export default function ERSchedulePage() {
   const [syncLinkCopied, setSyncLinkCopied] = useState<boolean>(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
+  // [1:1 정방형 위젯용 이미지 상태]
+  const [isWidgetModalOpen, setIsWidgetModalOpen] = useState<boolean>(false);
+  const [widgetImageUrl, setWidgetImageUrl] = useState<string | null>(null);
+  const [isGeneratingWidget, setIsGeneratingWidget] = useState<boolean>(false);
+
   // [요구사항 2]: 오늘 날짜(YYYY-MM-DD) 추출 - 1년치 스크롤에서도 오늘 위치를 즉각 식별
   const todayStr = useMemo(() => {
     const now = new Date();
@@ -1136,6 +1162,16 @@ export default function ERSchedulePage() {
     return { total, dCount, mCount, nCount };
   }, [scheduleList, currentYear, currentMonth]);
 
+  // [오늘의 근무 위젯 카드용]: 오늘 날짜 데이터 및 현우 근무 추출
+  const todayDayData = useMemo(() => {
+    return scheduleMap.get(todayStr) || null;
+  }, [scheduleMap, todayStr]);
+
+  const todayHyunwooShift = useMemo(() => {
+    if (!todayDayData) return null;
+    return todayDayData.shifts.find(s => s.hasTargetUser) || null;
+  }, [todayDayData]);
+
   // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
   // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
   const handleGoToCurrentMonth = () => {
@@ -1530,6 +1566,282 @@ export default function ERSchedulePage() {
     };
     reader.readAsText(file);
     if (e.target) e.target.value = '';
+  };
+
+  // [위젯 이미지 생성 함수]: 1:1 정방형 (1080x1080) 고해상도 캘린더 위젯 PNG 렌더링
+  const generateSquareWidgetImage = async (year: number, month: number): Promise<string | null> => {
+    if (typeof window === 'undefined') return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1080;
+    canvas.height = 1080;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // 1. 배경 채우기 (다크모드 딥 블랙 #09090b)
+    ctx.fillStyle = '#09090b';
+    ctx.fillRect(0, 0, 1080, 1080);
+
+    // 상단 은은한 앰비언트 글로우
+    const bgGrad = ctx.createLinearGradient(0, 0, 1080, 220);
+    bgGrad.addColorStop(0, 'rgba(250, 204, 21, 0.08)');
+    bgGrad.addColorStop(1, 'rgba(9, 9, 11, 0)');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 1080, 220);
+
+    // 2. 상단 헤더
+    ctx.fillStyle = '#71717a';
+    ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('EMERGENCY ROOM SCHEDULE', 54, 44);
+
+    // "YYYY년 M월" 메인 타이틀
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 46px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    ctx.fillText(`${year}년 ${month}월`, 54, 74);
+
+    // 현우 이번 달 통계 뱃지
+    const ymPrefix = `${year}-${String(month).padStart(2, '0')}`;
+    let mTotal = 0;
+    let mD = 0;
+    let mM = 0;
+    let mN = 0;
+    scheduleList.forEach(item => {
+      if (item.date.startsWith(ymPrefix) && item.hasTargetUser) {
+        mTotal++;
+        item.shifts.forEach(s => {
+          if (s.hasTargetUser) {
+            if (s.code === 'D') mD++;
+            else if (s.code === 'N') mN++;
+            else mM++;
+          }
+        });
+      }
+    });
+
+    const badgeStatsText = `현우 당직 ${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`;
+    ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    const badgeW = ctx.measureText(badgeStatsText).width + 36;
+    const badgeX = 1080 - 54 - badgeW;
+    const badgeY = 72;
+
+    ctx.fillStyle = '#18181b';
+    drawRoundRect(ctx, badgeX, badgeY, badgeW, 44, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#27272a';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = '#fde047';
+    ctx.fillText('현우 당직 ', badgeX + 18, badgeY + 12);
+    const hyunwooW = ctx.measureText('현우 당직 ').width;
+    ctx.fillStyle = '#e4e4e7';
+    ctx.fillText(`${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`, badgeX + 18 + hyunwooW, badgeY + 12);
+
+    // 3. 요일 헤더 행
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    const gridLeft = 44;
+    const gridWidth = 1080 - (gridLeft * 2);
+    const colWidth = gridWidth / 7;
+    const dayHeaderY = 144;
+
+    ctx.font = 'bold 22px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    ctx.textAlign = 'center';
+    dayNames.forEach((dName, colIdx) => {
+      const colX = gridLeft + (colIdx * colWidth) + (colWidth / 2);
+      if (colIdx === 0) ctx.fillStyle = '#ef4444';
+      else if (colIdx === 6) ctx.fillStyle = '#38bdf8';
+      else ctx.fillStyle = '#71717a';
+      ctx.fillText(dName, colX, dayHeaderY);
+    });
+
+    ctx.strokeStyle = '#27272a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(gridLeft, dayHeaderY + 34);
+    ctx.lineTo(gridLeft + gridWidth, dayHeaderY + 34);
+    ctx.stroke();
+
+    // 4. 날짜 그리드
+    const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const totalSlots = firstDayOfWeek + daysInMonth;
+    const numRows = Math.ceil(totalSlots / 7);
+
+    const gridTopY = dayHeaderY + 44;
+    const availableGridHeight = 1080 - gridTopY - 36;
+    const rowHeight = availableGridHeight / numRows;
+    const cellGap = 6;
+
+    const realToday = new Date();
+    const realTodayStr = normalizeDateKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
+
+    for (let r = 0; r < numRows; r++) {
+      for (let c = 0; c < 7; c++) {
+        const slotIndex = r * 7 + c;
+        const dayNum = slotIndex - firstDayOfWeek + 1;
+        const isValidDay = dayNum >= 1 && dayNum <= daysInMonth;
+
+        const cellX = gridLeft + (c * colWidth) + (cellGap / 2);
+        const cellY = gridTopY + (r * rowHeight) + (cellGap / 2);
+        const cellW = colWidth - cellGap;
+        const cellH = rowHeight - cellGap;
+
+        if (!isValidDay) {
+          ctx.fillStyle = 'rgba(24, 24, 27, 0.3)';
+          drawRoundRect(ctx, cellX, cellY, cellW, cellH, 10);
+          ctx.fill();
+          continue;
+        }
+
+        const dateStr = normalizeDateKey(year, month, dayNum);
+        const dayData = scheduleMap.get(dateStr);
+        const isToday = dateStr === realTodayStr;
+        const isSunday = c === 0;
+        const isSaturday = c === 6;
+        const isHoliday = Boolean(dayData?.holidayNote);
+        const hasTargetUser = Boolean(dayData?.hasTargetUser);
+
+        // 셀 배경
+        ctx.fillStyle = '#18181b';
+        drawRoundRect(ctx, cellX, cellY, cellW, cellH, 10);
+        ctx.fill();
+
+        // 셀 테두리
+        if (isToday) {
+          ctx.strokeStyle = '#10b981'; // 쨍한 초록색 테두리
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        } else if (hasTargetUser) {
+          ctx.strokeStyle = '#eab308'; // 노란색 테두리
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = '#27272a';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+
+        // 날짜 숫자
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.font = '900 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+
+        if (isToday) ctx.fillStyle = '#34d399';
+        else if (isSunday || isHoliday) ctx.fillStyle = '#f87171';
+        else if (isSaturday) ctx.fillStyle = '#38bdf8';
+        else ctx.fillStyle = '#e4e4e7';
+
+        ctx.fillText(String(dayNum), cellX + 8, cellY + 6);
+
+        // 오늘 뱃지
+        if (isToday) {
+          ctx.fillStyle = '#10b981';
+          drawRoundRect(ctx, cellX + 34, cellY + 6, 32, 16, 4);
+          ctx.fill();
+          ctx.fillStyle = '#022c22';
+          ctx.font = '900 10px sans-serif';
+          ctx.fillText('오늘', cellX + 38, cellY + 8);
+        }
+
+        // 공휴일 메모
+        if (dayData?.holidayNote) {
+          ctx.fillStyle = '#f87171';
+          ctx.font = 'bold 11px -apple-system, sans-serif';
+          const noteStr = dayData.holidayNote.length > 5 ? dayData.holidayNote.slice(0, 5) + '..' : dayData.holidayNote;
+          ctx.fillText(noteStr, cellX + 8, cellY + 28);
+        }
+
+        // 근무조 렌더링
+        const shifts = dayData?.shifts || [];
+        const shiftStartY = cellY + 36;
+        const shiftMaxDisplay = numRows >= 6 ? 2 : 3;
+        const shiftHeight = (cellH - 42) / shiftMaxDisplay;
+
+        shifts.slice(0, shiftMaxDisplay).forEach((shift, sIdx) => {
+          const sY = shiftStartY + (sIdx * shiftHeight);
+          const sH = shiftHeight - 3;
+          const hasHyunwoo = shift.hasTargetUser;
+          const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
+
+          // 박스 배경
+          if (hasHyunwoo) {
+            ctx.fillStyle = '#fde047'; // 현우 노란색
+            drawRoundRect(ctx, cellX + 5, sY, cellW - 10, sH, 5);
+            ctx.fill();
+          } else {
+            ctx.fillStyle = '#27272a'; // 타인 무채색
+            drawRoundRect(ctx, cellX + 5, sY, cellW - 10, sH, 5);
+            ctx.fill();
+          }
+
+          // 박스 텍스트
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = hasHyunwoo
+            ? '900 12px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif'
+            : '600 11px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+
+          ctx.fillStyle = hasHyunwoo ? '#000000' : '#a1a1aa';
+          const textContent = `${displayCode} ${shift.workers.join('/')}`;
+          const maxTextW = cellW - 14;
+          let renderedText = textContent;
+          if (ctx.measureText(renderedText).width > maxTextW) {
+            while (renderedText.length > 3 && ctx.measureText(renderedText + '..').width > maxTextW) {
+              renderedText = renderedText.slice(0, -1);
+            }
+            renderedText += '..';
+          }
+          ctx.fillText(renderedText, cellX + (cellW / 2), sY + (sH / 2));
+        });
+      }
+    }
+
+    return canvas.toDataURL('image/png');
+  };
+
+  // [위젯용 이미지 저장 핸들러]: 1:1 정방형 렌더링 실행 후 다운로드 및 iOS 공유 지원
+  const handleCreateWidgetImage = async () => {
+    setIsGeneratingWidget(true);
+    try {
+      const dataUrl = await generateSquareWidgetImage(currentYear, currentMonth);
+      if (!dataUrl) {
+        alert('이미지 생성에 실패했습니다.');
+        return;
+      }
+      setWidgetImageUrl(dataUrl);
+      setIsWidgetModalOpen(true);
+
+      // 자동 다운로드 시도 (PC/일반 브라우저용)
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = dataUrl;
+      downloadAnchor.download = `ER_Schedule_${currentYear}_${String(currentMonth).padStart(2, '0')}_Widget.png`;
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
+      // Web Share API가 지원되고 파일 공유가 가능한 경우 iOS 사진첩 저장으로 바로 안내
+      if (typeof navigator !== 'undefined' && navigator.canShare) {
+        try {
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          const file = new File([blob], `ER_Schedule_${currentYear}_${currentMonth}_Widget.png`, { type: 'image/png' });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: `${currentYear}년 ${currentMonth}월 ER 위젯 스케줄`,
+            });
+          }
+        } catch (shareErr: any) {
+          console.log('Share dismissed or not available:', shareErr);
+        }
+      }
+    } catch (err) {
+      console.error('Widget image generation error:', err);
+      alert('위젯 이미지 생성 중 오류가 발생했습니다.');
+    } finally {
+      setIsGeneratingWidget(false);
+    }
   };
 
   // [요구사항 1]: 연속 스크롤 월간 뷰 - 1Y 모드일 때 해당 연도의 1월~12월을 세로로 차곡차곡 연속 렌더링
@@ -1965,28 +2277,42 @@ export default function ERSchedulePage() {
               </div>
             </div>
 
-            {/* 내 근무 요약 바 및 [현우만 보기] 토글 */}
+            {/* 내 근무 요약 바 및 [현우만 보기] & [위젯 이미지] 버튼 */}
             <div className="flex items-center justify-between text-2xs pt-0.5 text-zinc-400">
-              <div className="flex items-center gap-1.5">
-                <span className="text-yellow-400 font-extrabold">현우 이번 달:</span>
-                <span className="text-zinc-200 font-bold">{myStatsThisMonth.total}회</span>
+              <div className="flex items-center gap-1.5 overflow-hidden">
+                <span className="text-yellow-400 font-extrabold shrink-0">현우 {currentMonth}월:</span>
+                <span className="text-zinc-200 font-bold shrink-0">{myStatsThisMonth.total}회</span>
                 <span className="text-zinc-600">|</span>
-                <span className="text-sky-400">D {myStatsThisMonth.dCount}</span>
-                <span className="text-amber-400">M {myStatsThisMonth.mCount}</span>
-                <span className="text-indigo-400">N {myStatsThisMonth.nCount}</span>
+                <span className="text-sky-400 shrink-0">D {myStatsThisMonth.dCount}</span>
+                <span className="text-amber-400 shrink-0">M {myStatsThisMonth.mCount}</span>
+                <span className="text-indigo-400 shrink-0">N {myStatsThisMonth.nCount}</span>
               </div>
 
-              <button
-                onClick={() => setOnlyMyShifts(!onlyMyShifts)}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-2xs transition-all border ${
-                  onlyMyShifts
-                    ? 'bg-yellow-400 text-black border-yellow-400 shadow-xs'
-                    : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-800'
-                }`}
-              >
-                <Sparkles className="w-3 h-3" />
-                <span>현우만</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* 1:1 정방형 위젯용 이미지 저장 버튼 */}
+                <button
+                  type="button"
+                  onClick={handleCreateWidgetImage}
+                  disabled={isGeneratingWidget}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-2xs transition-all border bg-zinc-900 hover:bg-zinc-800 text-sky-400 border-zinc-700 hover:border-sky-400/60 active:scale-95 shadow-xs"
+                  title="현재 월 1:1 정방형 위젯용 이미지 다운로드"
+                >
+                  <ImageIcon className="w-3 h-3 text-sky-400" />
+                  <span>{isGeneratingWidget ? '생성 중...' : '위젯 저장'}</span>
+                </button>
+
+                <button
+                  onClick={() => setOnlyMyShifts(!onlyMyShifts)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-2xs transition-all border ${
+                    onlyMyShifts
+                      ? 'bg-yellow-400 text-black border-yellow-400 shadow-xs'
+                      : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-800'
+                  }`}
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>현우만</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1994,7 +2320,52 @@ export default function ERSchedulePage() {
         {/* ========================================================= */}
         {/* 3. 달력 그리드 영역 (연속 스크롤 월간 뷰 지원) */}
         {/* ========================================================= */}
-        <main className="flex-1 p-2.5 pt-2 space-y-6 pb-safe">
+        <main className="flex-1 p-2.5 pt-2 space-y-4 pb-safe">
+          {/* 🌟 오늘의 근무 위젯 카드 (애플 위젯 스타일) */}
+          <div 
+            onClick={() => todayDayData && setSelectedDay(todayDayData)}
+            className="p-3 rounded-2xl bg-gradient-to-r from-zinc-900 via-zinc-900/90 to-zinc-800/80 border border-zinc-700/80 shadow-md hover:border-yellow-400/60 transition-all cursor-pointer group active:scale-[0.99] mb-2"
+            title="오늘의 상세 근무 확인 및 수정"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-yellow-400/20 border border-yellow-400/40 flex items-center justify-center text-yellow-400 shrink-0 shadow-xs">
+                  <Sparkles className="w-4 h-4 fill-yellow-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-black text-white">오늘의 근무</span>
+                    <span className="text-[9px] font-black text-emerald-950 bg-emerald-400 px-1.5 py-0.2 rounded-full">
+                      {todayStr}
+                    </span>
+                    {todayDayData?.holidayNote && (
+                      <span className="text-[9px] font-bold text-rose-400 bg-rose-950/80 px-1.5 py-0.2 rounded-full border border-rose-900 truncate max-w-[120px]">
+                        {todayDayData.holidayNote}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-300 mt-0.5 truncate">
+                    {todayHyunwooShift ? (
+                      <span className="text-yellow-400 font-extrabold flex items-center gap-1">
+                        <span>현우 {todayHyunwooShift.name}({todayHyunwooShift.code}) 당직</span>
+                        <span className="text-zinc-400 font-normal">({todayHyunwooShift.time})</span>
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400 font-bold flex items-center gap-1">
+                        <span>오늘 현우 당직 없음 (OFF)</span>
+                        <span className="text-zinc-400 font-normal">· 편안한 휴식일 ✨</span>
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0 flex items-center gap-1 text-zinc-400 group-hover:text-yellow-400 transition-colors pl-2">
+                <span className="text-[10px] font-bold hidden sm:inline">상세보기</span>
+                <ChevronRight className="w-4 h-4" />
+              </div>
+            </div>
+          </div>
           {monthsToRender.map(({ year, month }) => {
             const ymStr = `${year}-${String(month).padStart(2, '0')}`;
             const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
@@ -2709,6 +3080,67 @@ export default function ERSchedulePage() {
                   type="button"
                   onClick={() => setIsSyncModalOpen(false)}
                   className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-colors"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* 7. 1:1 정방형 위젯용 이미지 미리보기 & 저장 모달 */}
+        {/* ========================================================= */}
+        {isWidgetModalOpen && widgetImageUrl && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="absolute inset-0" onClick={() => setIsWidgetModalOpen(false)} />
+
+            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-4 z-10 text-zinc-100 max-h-[92vh] flex flex-col">
+              <div className="flex items-center justify-between pb-2.5 border-b border-zinc-800 shrink-0">
+                <div className="flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-yellow-400" />
+                  <h3 className="text-sm font-extrabold text-white">1:1 정방형 위젯 이미지</h3>
+                </div>
+                <button
+                  onClick={() => setIsWidgetModalOpen(false)}
+                  className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 1:1 정방형 렌더링 이미지 미리보기 프레임 */}
+              <div className="mt-3 relative aspect-square w-full rounded-xl overflow-hidden border border-zinc-700 bg-zinc-950 shadow-inner flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={widgetImageUrl}
+                  alt={`${currentYear}년 ${currentMonth}월 1:1 위젯 스케줄`}
+                  className="w-full h-full object-contain select-none"
+                />
+              </div>
+
+              <div className="mt-2.5 p-2 bg-zinc-950/80 rounded-xl border border-zinc-800 text-[11px] text-zinc-400 space-y-0.5">
+                <p className="text-yellow-400 font-bold flex items-center gap-1">
+                  <span>💡 아이폰 사진첩 저장 팁:</span>
+                </p>
+                <p>• 위 이미지를 <b className="text-zinc-200">1~2초간 꾹 길게 눌러</b> &apos;사진 앱에 저장&apos;을 누르세요.</p>
+                <p>• 다운로드가 지원되는 기기에서는 사진첩에 자동 저장되었습니다.</p>
+                <p>• 아이폰 홈 화면의 <b className="text-white">포토 위젯(Square)</b>에 지정하시면 매일 아름답게 표시됩니다.</p>
+              </div>
+
+              <div className="mt-3 pt-2 border-t border-zinc-800 flex gap-2 shrink-0">
+                <a
+                  href={widgetImageUrl}
+                  download={`ER_Schedule_${currentYear}_${String(currentMonth).padStart(2, '0')}_Widget.png`}
+                  className="flex-1 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-98"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>이미지 파일 다운로드</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setIsWidgetModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
                 >
                   닫기
                 </button>
