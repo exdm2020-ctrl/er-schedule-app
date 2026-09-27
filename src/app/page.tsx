@@ -55,12 +55,12 @@ function hydrateCompactSchedule(compactList: any[]): ParsedDay[] {
     D: { name: '데이', time: '08:00 - 15:00' },
     M1: { name: '미드1', time: '14:00 - 24:00' },
     M2: { name: '미드2', time: '14:00 - 24:00' },
-    M: { name: '미드', time: '14:00 - 24:00' },
+    M: { name: '주말 미드', time: '15:00 - 24:00' },
     H: { name: '주말 헬퍼', time: '14:00 - 23:00' },
     N: { name: '나이트', time: '00:00 - 익일 07:30' },
   };
 
-  return compactList.map(item => {
+  const restored = compactList.map(item => {
     const dateStr = item.d;
     const parts = String(dateStr).split('-');
     const year = parseInt(parts[0], 10) || 2026;
@@ -96,6 +96,144 @@ function hydrateCompactSchedule(compactList: any[]): ParsedDay[] {
       shifts,
       hasTargetUser,
       rawText: shifts.map(s => `${s.code} ${s.workers.join('/')}`).join('\n'),
+    };
+  });
+
+  return ensureWeekendAndHolidayHelper(restored);
+}
+
+// [주말/공휴일 헬퍼(H) & 미드(M) 구분 보장 유틸]:
+// 주말/공휴일은 H(주말 헬퍼 14:00-23:00)와 M(주말 미드 15:00-24:00)의 출근/근무시간이 완전히 다름!
+// 데이터에 H가 없거나 M/M1/M2로만 통일되어 있는 경우 H와 M으로 완벽히 분리 및 보정
+function ensureWeekendAndHolidayHelper(list: ParsedDay[]): ParsedDay[] {
+  return list.map(day => {
+    const isWeekendOrHol = day.isWeekend || Boolean(day.holidayNote);
+    if (!isWeekendOrHol) return day;
+
+    const hasHelper = day.shifts.some(s => s.code === 'H');
+    if (hasHelper) {
+      // 이미 H가 있는 경우 시간과 명칭 최신화만 보장
+      const updatedShifts = day.shifts.map(s => {
+        if (s.code === 'H') {
+          return {
+            ...s,
+            name: '주말 헬퍼',
+            time: s.time && s.time.includes('23') ? s.time : '14:00 - 23:00',
+          };
+        }
+        if (s.code === 'M' || s.code === 'M1' || s.code === 'M2') {
+          return {
+            ...s,
+            code: 'M' as ShiftCode,
+            name: '주말 미드',
+            time: s.time && s.time.includes('15') ? s.time : '15:00 - 24:00',
+          };
+        }
+        if (s.code === 'D') {
+          return {
+            ...s,
+            name: '주말 데이',
+            time: s.time && s.time.includes('16') ? s.time : '08:00 - 16:00',
+          };
+        }
+        if (s.code === 'N') {
+          return {
+            ...s,
+            name: '주말 나이트',
+            time: s.time && s.time.includes('08:00') ? s.time : '00:00 - 익일 08:00',
+          };
+        }
+        return s;
+      });
+      return {
+        ...day,
+        shifts: updatedShifts,
+        hasTargetUser: updatedShifts.some(s => s.hasTargetUser),
+        rawText: updatedShifts.map(s => `${s.code} ${s.workers.join('/')}`).join('\n'),
+      };
+    }
+
+    // 주말/공휴일인데 H가 아예 없는 경우:
+    const midCandidates: ShiftItem[] = [];
+    const nonMidShifts: ShiftItem[] = [];
+
+    day.shifts.forEach(s => {
+      if (s.code === 'M' || s.code === 'M1' || s.code === 'M2') {
+        midCandidates.push(s);
+      } else {
+        nonMidShifts.push(s);
+      }
+    });
+
+    if (midCandidates.length === 0) return day;
+
+    // 모든 미드 계열 근무자 수집
+    const allMidWorkers: string[] = [];
+    midCandidates.forEach(mc => {
+      mc.workers.forEach(w => {
+        if (!allMidWorkers.includes(w)) {
+          allMidWorkers.push(w);
+        }
+      });
+    });
+
+    const dayShift = nonMidShifts.find(s => s.code === 'D');
+    const nightShift = nonMidShifts.find(s => s.code === 'N');
+    const otherShifts = nonMidShifts.filter(s => s.code !== 'D' && s.code !== 'N');
+
+    const newShifts: ShiftItem[] = [];
+    if (dayShift) {
+      newShifts.push({
+        ...dayShift,
+        name: '주말 데이',
+        time: dayShift.time && dayShift.time.includes('16') ? dayShift.time : '08:00 - 16:00',
+      });
+    }
+
+    if (allMidWorkers.length >= 2) {
+      // 1명째는 H(주말 헬퍼, 14:00 - 23:00)
+      const hWorkers = [allMidWorkers[0]];
+      newShifts.push({
+        code: 'H',
+        name: '주말 헬퍼',
+        time: '14:00 - 23:00',
+        workers: hWorkers,
+        hasTargetUser: hWorkers.some(w => w.includes('현우')),
+      });
+      // 2명째 이후는 M(주말 미드, 15:00 - 24:00)
+      const mWorkers = allMidWorkers.slice(1);
+      newShifts.push({
+        code: 'M',
+        name: '주말 미드',
+        time: '15:00 - 24:00',
+        workers: mWorkers,
+        hasTargetUser: mWorkers.some(w => w.includes('현우')),
+      });
+    } else if (allMidWorkers.length === 1) {
+      // 1명만 있는 경우 H(주말 헬퍼)로 배정
+      newShifts.push({
+        code: 'H',
+        name: '주말 헬퍼',
+        time: '14:00 - 23:00',
+        workers: allMidWorkers,
+        hasTargetUser: allMidWorkers.some(w => w.includes('현우')),
+      });
+    }
+
+    otherShifts.forEach(os => newShifts.push(os));
+    if (nightShift) {
+      newShifts.push({
+        ...nightShift,
+        name: '주말 나이트',
+        time: nightShift.time && nightShift.time.includes('08:00') ? nightShift.time : '00:00 - 익일 08:00',
+      });
+    }
+
+    return {
+      ...day,
+      shifts: newShifts,
+      hasTargetUser: newShifts.some(s => s.hasTargetUser),
+      rawText: newShifts.map(s => `${s.code} ${s.workers.join('/')}`).join('\n'),
     };
   });
 }
@@ -321,7 +459,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
   // 근무자 텍스트 정리 함수 (박현우 -> 현우, 슬래시/쉼표/공백 분리)
   const cleanWorkers = (lineStr: string) => {
     if (!lineStr) return [];
-    const stripped = lineStr.replace(/^(D|DAY|M|MID|M1|M2|H|HELPER|N|NIGHT|데이|미드|헬퍼|나이트)\s*[:\-\s]\s*/i, '');
+    const stripped = lineStr.replace(/^[\[\(]?(D|DAY|M|MID|M1|M2|H|HELPER|N|NIGHT|데이|미드|헬퍼|나이트)[\]\)]?\s*[:\-\.\s/]\s*/i, '');
     return stripped
       .split(/[\/,\s+&|]+/)
       .map(w => w.trim())
@@ -491,89 +629,298 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
                 .filter(l => l.replace(/[\s\-_=]/g, '').length > 0);
 
               const shifts: ShiftItem[] = [];
+              const isWeekendOrHoliday = isWeekend || Boolean(holidayNote);
 
-              // [요구사항 1]: M 근무 분리 헬퍼 (M1과 M2가 위아래 2개 줄로 예쁘게 분리되도록 배정)
-              const pushMidShifts = (lineText: string) => {
-                const workers = cleanWorkers(lineText);
-                if (workers.length >= 2) {
-                  // 근무자가 2명 이상이면 M1과 M2로 분리하여 2개 줄 렌더링 지원!
-                  const m1Workers = [workers[0]];
-                  const m2Workers = workers.slice(1);
-                  shifts.push({
-                    code: 'M1',
-                    name: '미드1',
-                    time: '14:00 - 24:00',
-                    workers: m1Workers,
-                    hasTargetUser: m1Workers.some(w => w.includes('현우')),
-                  });
-                  shifts.push({
-                    code: 'M2',
-                    name: '미드2',
-                    time: '14:00 - 24:00',
-                    workers: m2Workers,
-                    hasTargetUser: m2Workers.some(w => w.includes('현우')),
-                  });
-                } else if (workers.length === 1) {
-                  shifts.push({
-                    code: 'M1',
-                    name: '미드',
-                    time: '14:00 - 24:00',
-                    workers,
-                    hasTargetUser: workers.some(w => w.includes('현우')),
-                  });
+              // 1) 각 라인의 접두어(H, M, D, N) 우선 파싱 함수 (대괄호/소괄호/특수문자 모두 지원)
+              const parseExplicitPrefix = (lineText: string): { code: ShiftCode | null; workers: string[] } => {
+                const trimmed = lineText.trim();
+                let detectedCode: ShiftCode | null = null;
+                if (/^[\[\(]?(H|HELPER|헬퍼)[\]\)]?(\s*[:\-\./]|\s+|$)/i.test(trimmed)) {
+                  detectedCode = 'H';
+                } else if (/^[\[\(]?M1[\]\)]?(\s*[:\-\./]|\s+|$)/i.test(trimmed)) {
+                  detectedCode = 'M1';
+                } else if (/^[\[\(]?M2[\]\)]?(\s*[:\-\./]|\s+|$)/i.test(trimmed)) {
+                  detectedCode = 'M2';
+                } else if (/^[\[\(]?(M|MID|미드)[\]\)]?(\s*[:\-\./]|\s+|$)/i.test(trimmed)) {
+                  detectedCode = 'M';
+                } else if (/^[\[\(]?(D|DAY|데이)[\]\)]?(\s*[:\-\./]|\s+|$)/i.test(trimmed)) {
+                  detectedCode = 'D';
+                } else if (/^[\[\(]?(N|NIGHT|나이트)[\]\)]?(\s*[:\-\./]|\s+|$)/i.test(trimmed)) {
+                  detectedCode = 'N';
+                }
+                const workers = cleanWorkers(trimmed);
+                return { code: detectedCode, workers };
+              };
+
+              // 2) 주말/공휴일 및 평일 맞춤형 미드/헬퍼 배정 헬퍼
+              const pushMidAndHelperShifts = (lineText: string) => {
+                const { code: explicitCode, workers } = parseExplicitPrefix(lineText);
+                if (workers.length === 0) return;
+
+                if (isWeekendOrHoliday) {
+                  // [주말/공휴일]: 헬퍼(H)와 미드(M)의 출근시간/근무시간이 완전히 다름!
+                  // H: 14:00 - 23:00 (주말 헬퍼)
+                  // M: 15:00 - 24:00 (주말 미드)
+                  if (explicitCode === 'H') {
+                    shifts.push({
+                      code: 'H',
+                      name: '주말 헬퍼',
+                      time: '14:00 - 23:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  } else if (workers.length >= 2) {
+                    // 접두어가 M이든 없든 2명 이상 적혀있는 경우: 첫 번째는 헬퍼(H), 두 번째는 미드(M)로 분리!
+                    const hWorkers = [workers[0]];
+                    const mWorkers = workers.slice(1);
+                    shifts.push({
+                      code: 'H',
+                      name: '주말 헬퍼',
+                      time: '14:00 - 23:00',
+                      workers: hWorkers,
+                      hasTargetUser: hWorkers.some(w => w.includes('현우')),
+                    });
+                    shifts.push({
+                      code: 'M',
+                      name: '주말 미드',
+                      time: '15:00 - 24:00',
+                      workers: mWorkers,
+                      hasTargetUser: mWorkers.some(w => w.includes('현우')),
+                    });
+                  } else {
+                    // 1명만 있는 경우: 이미 H가 배정되었거나 명시적 M2인 경우 M, 아니면 H로 배정
+                    const alreadyHasH = shifts.some(s => s.code === 'H');
+                    const finalCode: ShiftCode = (alreadyHasH || explicitCode === 'M2') ? 'M' : 'H';
+                    shifts.push({
+                      code: finalCode,
+                      name: finalCode === 'H' ? '주말 헬퍼' : '주말 미드',
+                      time: finalCode === 'H' ? '14:00 - 23:00' : '15:00 - 24:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
+                } else {
+                  // [평일]: H(헬퍼)는 없고, M1(14:00-24:00)과 M2(14:00-24:00)로 분리
+                  if (workers.length >= 2) {
+                    const m1Workers = [workers[0]];
+                    const m2Workers = workers.slice(1);
+                    shifts.push({
+                      code: 'M1',
+                      name: '미드1',
+                      time: '14:00 - 24:00',
+                      workers: m1Workers,
+                      hasTargetUser: m1Workers.some(w => w.includes('현우')),
+                    });
+                    shifts.push({
+                      code: 'M2',
+                      name: '미드2',
+                      time: '14:00 - 24:00',
+                      workers: m2Workers,
+                      hasTargetUser: m2Workers.some(w => w.includes('현우')),
+                    });
+                  } else {
+                    const alreadyHasM1 = shifts.some(s => s.code === 'M1');
+                    const code = (alreadyHasM1 || explicitCode === 'M2') ? 'M2' : 'M1';
+                    shifts.push({
+                      code,
+                      name: code === 'M2' ? '미드2' : '미드1',
+                      time: '14:00 - 24:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
                 }
               };
 
-              // [근무조 배정 알고리즘]
-              if (lines.length >= 3) {
-                // 3줄: [0]=D, [1]=M1/M2, [2]=N
+              // [근무조 라인 수별 스마트 배정 알고리즘]
+              const hasAnyExplicitPrefix = lines.some(l => parseExplicitPrefix(l).code !== null);
+
+              if (hasAnyExplicitPrefix) {
+                // 접두어 기반 명시적 배정
+                const hasExplicitH = lines.some(l => parseExplicitPrefix(l).code === 'H');
+                let assignedHelperOnWeekend = hasExplicitH;
+
+                lines.forEach((lineText) => {
+                  const { code, workers } = parseExplicitPrefix(lineText);
+                  if (workers.length === 0) return;
+                  if (code === 'H') {
+                    shifts.push({
+                      code: 'H',
+                      name: '주말 헬퍼',
+                      time: '14:00 - 23:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  } else if (code === 'M' || code === 'M1' || code === 'M2') {
+                    if (isWeekendOrHoliday) {
+                      // 주말/공휴일인데 H가 아직 배정되지 않았다면:
+                      // 첫 번째 미드 줄을 H(주말 헬퍼 14:00-23:00)로 분리!
+                      if (!assignedHelperOnWeekend) {
+                        if (workers.length >= 2) {
+                          const hWorkers = [workers[0]];
+                          const mWorkers = workers.slice(1);
+                          shifts.push({
+                            code: 'H',
+                            name: '주말 헬퍼',
+                            time: '14:00 - 23:00',
+                            workers: hWorkers,
+                            hasTargetUser: hWorkers.some(w => w.includes('현우')),
+                          });
+                          shifts.push({
+                            code: 'M',
+                            name: '주말 미드',
+                            time: '15:00 - 24:00',
+                            workers: mWorkers,
+                            hasTargetUser: mWorkers.some(w => w.includes('현우')),
+                          });
+                        } else {
+                          shifts.push({
+                            code: 'H',
+                            name: '주말 헬퍼',
+                            time: '14:00 - 23:00',
+                            workers,
+                            hasTargetUser: workers.some(w => w.includes('현우')),
+                          });
+                        }
+                        assignedHelperOnWeekend = true;
+                      } else {
+                        // 이미 H가 배정된 경우 M(주말 미드 15:00-24:00)로 배정
+                        shifts.push({
+                          code: 'M',
+                          name: '주말 미드',
+                          time: '15:00 - 24:00',
+                          workers,
+                          hasTargetUser: workers.some(w => w.includes('현우')),
+                        });
+                      }
+                    } else {
+                      // 평일인 경우
+                      shifts.push({
+                        code: code === 'M' ? 'M1' : code,
+                        name: code === 'M2' ? '미드2' : '미드1',
+                        time: '14:00 - 24:00',
+                        workers,
+                        hasTargetUser: workers.some(w => w.includes('현우')),
+                      });
+                    }
+                  } else if (code === 'D') {
+                    shifts.push({
+                      code: 'D',
+                      name: isWeekendOrHoliday ? '주말 데이' : '데이',
+                      time: isWeekendOrHoliday ? '08:00 - 16:00' : '08:00 - 15:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  } else if (code === 'N') {
+                    shifts.push({
+                      code: 'N',
+                      name: isWeekendOrHoliday ? '주말 나이트' : '나이트',
+                      time: isWeekendOrHoliday ? '00:00 - 익일 08:00' : '00:00 - 익일 07:30',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  } else {
+                    pushMidAndHelperShifts(lineText);
+                  }
+                });
+              } else if (lines.length >= 4) {
+                // 4줄인 경우: [0]=D, [1]=H(주말/공휴일) 또는 M1, [2]=M(주말/공휴일) 또는 M2, [3]=N
                 if (lines[0]) {
                   const workers = cleanWorkers(lines[0]);
                   if (workers.length > 0) {
                     shifts.push({
                       code: 'D',
-                      name: '데이',
-                      time: '08:00 - 15:00',
+                      name: isWeekendOrHoliday ? '주말 데이' : '데이',
+                      time: isWeekendOrHoliday ? '08:00 - 16:00' : '08:00 - 15:00',
                       workers,
                       hasTargetUser: workers.some(w => w.includes('현우')),
                     });
                   }
                 }
                 if (lines[1]) {
-                  pushMidShifts(lines[1]);
+                  const workers = cleanWorkers(lines[1]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: isWeekendOrHoliday ? 'H' : 'M1',
+                      name: isWeekendOrHoliday ? '주말 헬퍼' : '미드1',
+                      time: isWeekendOrHoliday ? '14:00 - 23:00' : '14:00 - 24:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
+                }
+                if (lines[2]) {
+                  const workers = cleanWorkers(lines[2]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: isWeekendOrHoliday ? 'M' : 'M2',
+                      name: isWeekendOrHoliday ? '주말 미드' : '미드2',
+                      time: isWeekendOrHoliday ? '15:00 - 24:00' : '14:00 - 24:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
+                }
+                if (lines[3]) {
+                  const workers = cleanWorkers(lines[3]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: 'N',
+                      name: isWeekendOrHoliday ? '주말 나이트' : '나이트',
+                      time: isWeekendOrHoliday ? '00:00 - 익일 08:00' : '00:00 - 익일 07:30',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
+                }
+              } else if (lines.length === 3) {
+                // 3줄인 경우: [0]=D, [1]=H/M, [2]=N
+                if (lines[0]) {
+                  const workers = cleanWorkers(lines[0]);
+                  if (workers.length > 0) {
+                    shifts.push({
+                      code: 'D',
+                      name: isWeekendOrHoliday ? '주말 데이' : '데이',
+                      time: isWeekendOrHoliday ? '08:00 - 16:00' : '08:00 - 15:00',
+                      workers,
+                      hasTargetUser: workers.some(w => w.includes('현우')),
+                    });
+                  }
+                }
+                if (lines[1]) {
+                  pushMidAndHelperShifts(lines[1]);
                 }
                 if (lines[2]) {
                   const workers = cleanWorkers(lines[2]);
                   if (workers.length > 0) {
                     shifts.push({
                       code: 'N',
-                      name: '나이트',
-                      time: '00:00 - 익일 08:00',
+                      name: isWeekendOrHoliday ? '주말 나이트' : '나이트',
+                      time: isWeekendOrHoliday ? '00:00 - 익일 08:00' : '00:00 - 익일 07:30',
                       workers,
                       hasTargetUser: workers.some(w => w.includes('현우')),
                     });
                   }
                 }
               } else if (lines.length === 2) {
-                // 2줄: D는 없음(투명 빈칸)! [0]=M1/M2, [1]=N
+                // 2줄인 경우: [0]=H/M, [1]=N
                 if (lines[0]) {
-                  pushMidShifts(lines[0]);
+                  pushMidAndHelperShifts(lines[0]);
                 }
                 if (lines[1]) {
                   const workers = cleanWorkers(lines[1]);
                   if (workers.length > 0) {
                     shifts.push({
                       code: 'N',
-                      name: '나이트',
-                      time: '00:00 - 익일 08:00',
+                      name: isWeekendOrHoliday ? '주말 나이트' : '나이트',
+                      time: isWeekendOrHoliday ? '00:00 - 익일 08:00' : '00:00 - 익일 07:30',
                       workers,
                       hasTargetUser: workers.some(w => w.includes('현우')),
                     });
                   }
                 }
               } else if (lines.length === 1) {
-                // 1줄: M 위치에 배정
-                pushMidShifts(lines[0]);
+                pushMidAndHelperShifts(lines[0]);
               }
 
               if (!processedDateKeys.has(dateStr)) {
@@ -608,7 +955,7 @@ function parseExcelData(fileBuffer: ArrayBuffer): ParsedDay[] {
   // 날짜순으로 정렬
   parsedData.sort((a, b) => a.date.localeCompare(b.date));
 
-  return parsedData;
+  return ensureWeekendAndHolidayHelper(parsedData);
 }
 
 // ==========================================
@@ -794,8 +1141,9 @@ export default function ERSchedulePage() {
       if (cachedData) {
         const parsed = JSON.parse(cachedData);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setScheduleList(parsed);
-          const [y, m] = parsed[0].yearMonth.split('-').map(Number);
+          const normalized = ensureWeekendAndHolidayHelper(parsed);
+          setScheduleList(normalized);
+          const [y, m] = normalized[0].yearMonth.split('-').map(Number);
           setCurrentYear(y);
           setCurrentMonth(m);
           return true;
@@ -841,7 +1189,8 @@ export default function ERSchedulePage() {
         bc.onmessage = (event) => {
           if (event.data?.type === 'SCHEDULE_UPDATED' && event.data?.payload) {
             console.log('[Sync] 다른 바로가기/탭으로부터 최신 스케줄 수신');
-            setScheduleList(event.data.payload);
+            const normalized = ensureWeekendAndHolidayHelper(event.data.payload);
+            setScheduleList(normalized);
             setSyncStatus('synced');
             setSyncToastMessage('다른 창에서 수정한 내용이 실시간 동기화되었습니다.');
             setTimeout(() => setSyncToastMessage(null), 2500);
@@ -855,7 +1204,8 @@ export default function ERSchedulePage() {
           try {
             const parsed = JSON.parse(e.newValue);
             if (Array.isArray(parsed) && parsed.length > 0) {
-              setScheduleList(parsed);
+              const normalized = ensureWeekendAndHolidayHelper(parsed);
+              setScheduleList(normalized);
               setSyncStatus('synced');
             }
           } catch (err) {
@@ -1143,6 +1493,7 @@ export default function ERSchedulePage() {
     const ymPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
     let total = 0;
     let dCount = 0;
+    let hCount = 0;
     let mCount = 0;
     let nCount = 0;
 
@@ -1152,6 +1503,7 @@ export default function ERSchedulePage() {
         item.shifts.forEach(s => {
           if (s.hasTargetUser) {
             if (s.code === 'D') dCount++;
+            else if (s.code === 'H') hCount++;
             else if (s.code === 'N') nCount++;
             else mCount++;
           }
@@ -1159,7 +1511,7 @@ export default function ERSchedulePage() {
       }
     });
 
-    return { total, dCount, mCount, nCount };
+    return { total, dCount, hCount, mCount, nCount };
   }, [scheduleList, currentYear, currentMonth]);
 
   // [요구사항 2]: Now 클릭 시 무조건 현재 실제 날짜가 속한 이번 달로 즉시 이동
@@ -1324,7 +1676,7 @@ export default function ERSchedulePage() {
     D: { name: '데이', defaultTime: '08:00 - 15:00' },
     M1: { name: '미드1', defaultTime: '14:00 - 24:00' },
     M2: { name: '미드2', defaultTime: '14:00 - 24:00' },
-    M: { name: '미드', defaultTime: '14:00 - 24:00' },
+    M: { name: '주말 미드', defaultTime: '15:00 - 24:00' },
     H: { name: '주말 헬퍼', defaultTime: '14:00 - 23:00' },
     N: { name: '나이트', defaultTime: '00:00 - 익일 07:30' },
   };
@@ -1538,7 +1890,7 @@ export default function ERSchedulePage() {
           if (parsed[0].d && parsed[0].s) {
             finalData = hydrateCompactSchedule(parsed);
           } else {
-            finalData = parsed;
+            finalData = ensureWeekendAndHolidayHelper(parsed);
           }
           setScheduleList(finalData);
           localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(finalData));
@@ -2274,6 +2626,9 @@ export default function ERSchedulePage() {
                 <span className="text-zinc-200 font-bold shrink-0">{myStatsThisMonth.total}회</span>
                 <span className="text-zinc-600">|</span>
                 <span className="text-sky-400 shrink-0">D {myStatsThisMonth.dCount}</span>
+                {myStatsThisMonth.hCount > 0 && (
+                  <span className="text-emerald-400 shrink-0">H {myStatsThisMonth.hCount}</span>
+                )}
                 <span className="text-amber-400 shrink-0">M {myStatsThisMonth.mCount}</span>
                 <span className="text-indigo-400 shrink-0">N {myStatsThisMonth.nCount}</span>
               </div>
@@ -2642,12 +2997,12 @@ export default function ERSchedulePage() {
                                 onChange={(e) => handleShiftCodeChange(idx, e.target.value as ShiftCode)}
                                 className="bg-zinc-900 border border-zinc-700 text-white text-xs font-black rounded-md px-1.5 py-0.5 focus:outline-none focus:border-yellow-400 cursor-pointer shrink-0"
                               >
-                                <option value="D">D (데이)</option>
-                                <option value="M1">M1 (미드1)</option>
-                                <option value="M2">M2 (미드2)</option>
-                                <option value="M">M (미드)</option>
-                                <option value="H">H (헬퍼)</option>
-                                <option value="N">N (나이트)</option>
+                                <option value="D">D (데이 08:00-15:00)</option>
+                                <option value="H">H (주말 헬퍼 14:00-23:00)</option>
+                                <option value="M">M (주말 미드 15:00-24:00)</option>
+                                <option value="M1">M1 (평일 미드1 14:00-24:00)</option>
+                                <option value="M2">M2 (평일 미드2 14:00-24:00)</option>
+                                <option value="N">N (나이트 00:00-07:30)</option>
                               </select>
 
                               <input
