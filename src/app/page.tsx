@@ -1101,12 +1101,15 @@ export default function ERSchedulePage() {
   const [syncLinkCopied, setSyncLinkCopied] = useState<boolean>(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
-  // [1:1 정방형 위젯용 이미지 상태]
+  // [1:1 정방형 위젯용 이미지 상태 (기본 이름형 & 근무 시간형 듀얼 지원)]
   const [isWidgetModalOpen, setIsWidgetModalOpen] = useState<boolean>(false);
-  const [widgetImageUrl, setWidgetImageUrl] = useState<string | null>(null);
-  const [widgetImageFile, setWidgetImageFile] = useState<File | null>(null);
+  const [widgetMode, setWidgetMode] = useState<'name' | 'time'>('name');
+  const [widgetNameImage, setWidgetNameImage] = useState<{ dataUrl: string; file: File } | null>(null);
+  const [widgetTimeImage, setWidgetTimeImage] = useState<{ dataUrl: string; file: File } | null>(null);
   const [isGeneratingWidget, setIsGeneratingWidget] = useState<boolean>(false);
   const [saveToPhotosFeedback, setSaveToPhotosFeedback] = useState<string | null>(null);
+
+  const activeWidgetImage = widgetMode === 'time' ? widgetTimeImage : widgetNameImage;
 
   // [요구사항 2]: 오늘 날짜(YYYY-MM-DD) 추출 - 1년치 스크롤에서도 오늘 위치를 즉각 식별
   const todayStr = useMemo(() => {
@@ -1912,9 +1915,34 @@ export default function ERSchedulePage() {
     if (e.target) e.target.value = '';
   };
 
+// [근무 시간 위젯용 자동 치환 규칙]:
+// 평일 (월~금): D > 06시, M > 12시, N > 오후 10시
+// 주말 및 공휴일 (토, 일, holidayNote): D > 06시, H > 12시, M > 오후 2시, N > 오후 10시
+function getShiftTimeText(shiftCode: ShiftCode, isWeekendOrHoliday: boolean): string {
+  const code = (shiftCode === 'M1' || shiftCode === 'M2') ? 'M' : shiftCode;
+  if (isWeekendOrHoliday) {
+    if (code === 'D') return '06시';
+    if (code === 'H') return '12시';
+    if (code === 'M') return '오후 2시';
+    if (code === 'N') return '오후 10시';
+  } else {
+    // 평일 (월~금)
+    if (code === 'D') return '06시';
+    if (code === 'M') return '12시';
+    if (code === 'N') return '오후 10시';
+    if (code === 'H') return '12시';
+  }
+  return '';
+}
+
   // [위젯 이미지 생성 함수]: 1:1 정방형 (1200x1200) 초고해상도 캘린더 위젯 PNG 렌더링
   // 완벽한 칸/뱃지 높이 통일(Uniform Spacing) + 텍스트 대폭 확대 + 중앙 정렬 통일
-  const generateSquareWidgetImage = async (year: number, month: number): Promise<{ dataUrl: string; file: File } | null> => {
+  // mode: 'name' (기본 이름 표기) | 'time' (현우 노란색 뱃지 출근 시간 치환 표기)
+  const generateSquareWidgetImage = async (
+    year: number, 
+    month: number,
+    mode: 'name' | 'time' = 'name'
+  ): Promise<{ dataUrl: string; file: File } | null> => {
     if (typeof window === 'undefined') return null;
 
     const canvas = document.createElement('canvas');
@@ -2019,9 +2047,6 @@ export default function ERSchedulePage() {
     const rowHeight = availableGridHeight / numRows;
     const cellGap = 5;
 
-    const realToday = new Date();
-    const realTodayStr = normalizeDateKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
-
     // 빈 슬롯 플레이스홀더 (4그리드 규격 100% 동일 유지)
     const drawEmptySlotBadge = (bX: number, bY: number, bW: number, bH: number) => {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
@@ -2038,7 +2063,8 @@ export default function ERSchedulePage() {
       bX: number,
       bY: number,
       bW: number,
-      bH: number
+      bH: number,
+      isWeekendOrHoliday: boolean
     ) => {
       const hasHyunwoo = shift.hasTargetUser;
       const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
@@ -2047,6 +2073,19 @@ export default function ERSchedulePage() {
       const badgeRadius = 5;
 
       let namesText = shift.workers.join('/');
+
+      // [근무 시간 위젯 모드]: 현우 님의 노란색 하이라이트 뱃지 안의 "현우" 텍스트를 출근 시간 텍스트로 자동 치환
+      if (mode === 'time' && hasHyunwoo) {
+        const timeText = getShiftTimeText(shift.code, isWeekendOrHoliday);
+        if (timeText) {
+          if (namesText.includes('현우')) {
+            namesText = namesText.replace(/박?현우/g, timeText);
+          } else {
+            namesText = timeText;
+          }
+        }
+      }
+
       let currentSize = baseFontSize;
       const minSize = 11.5;
       const maxTextW = bW - 10;
@@ -2135,6 +2174,7 @@ export default function ERSchedulePage() {
         const isSunday = c === 0;
         const isSaturday = c === 6;
         const isHoliday = Boolean(dayData?.holidayNote);
+        const isWeekendOrHoliday = isSunday || isSaturday || isHoliday;
         const hasTargetUser = Boolean(dayData?.hasTargetUser);
 
         // 셀 배경
@@ -2218,7 +2258,7 @@ export default function ERSchedulePage() {
         // Slot 1: Day (D)
         const slot1Y = slotsStartY;
         if (slot1Shift) {
-          drawShiftSlotBadge(slot1Shift, badgeX, slot1Y, badgeW, slotH);
+          drawShiftSlotBadge(slot1Shift, badgeX, slot1Y, badgeW, slotH, isWeekendOrHoliday);
         } else {
           drawEmptySlotBadge(badgeX, slot1Y, badgeW, slotH);
         }
@@ -2226,7 +2266,7 @@ export default function ERSchedulePage() {
         // Slot 2: Helper (H) 또는 Mid 1
         const slot2Y = slotsStartY + (slotH + slotGap);
         if (slot2Shift) {
-          drawShiftSlotBadge(slot2Shift, badgeX, slot2Y, badgeW, slotH);
+          drawShiftSlotBadge(slot2Shift, badgeX, slot2Y, badgeW, slotH, isWeekendOrHoliday);
         } else {
           drawEmptySlotBadge(badgeX, slot2Y, badgeW, slotH);
         }
@@ -2234,7 +2274,7 @@ export default function ERSchedulePage() {
         // Slot 3: Mid (M) 또는 Mid 2
         const slot3Y = slotsStartY + (slotH + slotGap) * 2;
         if (slot3Shift) {
-          drawShiftSlotBadge(slot3Shift, badgeX, slot3Y, badgeW, slotH);
+          drawShiftSlotBadge(slot3Shift, badgeX, slot3Y, badgeW, slotH, isWeekendOrHoliday);
         } else {
           drawEmptySlotBadge(badgeX, slot3Y, badgeW, slotH);
         }
@@ -2242,7 +2282,7 @@ export default function ERSchedulePage() {
         // Slot 4: Night (N)
         const slot4Y = slotsStartY + (slotH + slotGap) * 3;
         if (slot4Shift) {
-          drawShiftSlotBadge(slot4Shift, badgeX, slot4Y, badgeW, slotH);
+          drawShiftSlotBadge(slot4Shift, badgeX, slot4Y, badgeW, slotH, isWeekendOrHoliday);
         } else {
           drawEmptySlotBadge(badgeX, slot4Y, badgeW, slotH);
         }
@@ -2254,22 +2294,29 @@ export default function ERSchedulePage() {
     const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!blob) return null;
 
-    const file = new File([blob], `ER_Schedule_${year}년_${month}월_스케줄.png`, { type: 'image/png' });
+    const fileName = mode === 'time'
+      ? `ER_Schedule_${year}년_${month}월_스케줄(근무시간).png`
+      : `ER_Schedule_${year}년_${month}월_스케줄.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
     return { dataUrl, file };
   };
 
-  // [위젯용 이미지 생성 및 모달 오픈 핸들러]
+  // [위젯용 이미지 생성 및 모달 오픈 핸들러]: 기본(이름)과 근무시간(출근시간) 두 이미지를 사전 동시 생성
   const handleCreateWidgetImage = async () => {
     setIsGeneratingWidget(true);
     setSaveToPhotosFeedback(null);
     try {
-      const result = await generateSquareWidgetImage(currentYear, currentMonth);
-      if (!result) {
+      const [nameResult, timeResult] = await Promise.all([
+        generateSquareWidgetImage(currentYear, currentMonth, 'name'),
+        generateSquareWidgetImage(currentYear, currentMonth, 'time'),
+      ]);
+      if (!nameResult || !timeResult) {
         alert('이미지 생성에 실패했습니다.');
         return;
       }
-      setWidgetImageUrl(result.dataUrl);
-      setWidgetImageFile(result.file);
+      setWidgetNameImage(nameResult);
+      setWidgetTimeImage(timeResult);
+      setWidgetMode('name'); // 기본 모드로 오픈
       setIsWidgetModalOpen(true);
     } catch (err) {
       console.error('Widget image generation error:', err);
@@ -2280,18 +2327,25 @@ export default function ERSchedulePage() {
   };
 
   // [사진첩에 이미지 저장 핸들러]: 사용자 터치 즉시 실행되어 iOS Share Sheet가 100% 정상 발동
-  const handleSaveToPhotosAction = async () => {
-    if (!widgetImageFile || !widgetImageUrl) return;
+  const handleSaveToPhotosAction = async (targetMode?: 'name' | 'time') => {
+    const selectedMode = targetMode || widgetMode;
+    if (targetMode && targetMode !== widgetMode) {
+      setWidgetMode(targetMode);
+    }
+    const target = selectedMode === 'time' ? widgetTimeImage : widgetNameImage;
+    if (!target) return;
+
+    const modeLabel = selectedMode === 'time' ? '근무 시간' : '기본';
 
     // 1) iOS Safari / PWA Web Share 지원 시: 시스템 공유창을 띄워 [이미지 저장]을 누르면 사진첩에 즉시 저장
     if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
       try {
-        if (navigator.canShare({ files: [widgetImageFile] })) {
+        if (navigator.canShare({ files: [target.file] })) {
           await navigator.share({
-            files: [widgetImageFile],
-            title: `${currentYear}년 ${currentMonth}월 ER 스케줄`,
+            files: [target.file],
+            title: `${currentYear}년 ${currentMonth}월 ER 스케줄 (${modeLabel})`,
           });
-          setSaveToPhotosFeedback('공유 창에서 [이미지 저장]을 탭하시면 사진첩에 저장됩니다.');
+          setSaveToPhotosFeedback(`[${modeLabel}] 공유 창에서 [이미지 저장]을 탭하시면 사진첩에 저장됩니다.`);
           return;
         }
       } catch (err: any) {
@@ -2303,12 +2357,12 @@ export default function ERSchedulePage() {
     // 2) 일반 PC / 안드로이드 브라우저: 즉시 고화질 다운로드 실행
     try {
       const a = document.createElement('a');
-      a.href = widgetImageUrl;
-      a.download = `ER_Schedule_${currentYear}년_${currentMonth}월_스케줄.png`;
+      a.href = target.dataUrl;
+      a.download = target.file.name;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setSaveToPhotosFeedback('이미지가 다운로드되었습니다. 갤러리/사진첩에서 확인하세요.');
+      setSaveToPhotosFeedback(`[${modeLabel}] 이미지가 다운로드되었습니다. 갤러리/사진첩에서 확인하세요.`);
     } catch (e) {
       console.error('Download error:', e);
     }
@@ -2316,12 +2370,14 @@ export default function ERSchedulePage() {
 
   // [클립보드에 이미지 복사]
   const handleCopyWidgetImageToClipboard = async () => {
-    if (!widgetImageFile) return;
+    const target = activeWidgetImage;
+    if (!target) return;
+    const modeLabel = widgetMode === 'time' ? '근무 시간' : '기본';
     try {
       await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': widgetImageFile })
+        new ClipboardItem({ 'image/png': target.file })
       ]);
-      setSaveToPhotosFeedback('이미지가 클립보드에 복사되었습니다! 카카오톡이나 메모장에 붙여넣기 하실 수 있습니다.');
+      setSaveToPhotosFeedback(`[${modeLabel}] 이미지가 클립보드에 복사되었습니다! 카카오톡이나 메모장에 붙여넣기 하실 수 있습니다.`);
     } catch (err) {
       console.warn('Clipboard copy failed:', err);
       alert('클립보드 이미지 복사를 지원하지 않는 브라우저입니다.');
@@ -3535,12 +3591,13 @@ export default function ERSchedulePage() {
         {/* ========================================================= */}
         {/* 7. 1:1 정방형 위젯용 이미지 미리보기 & 저장 모달 */}
         {/* ========================================================= */}
-        {isWidgetModalOpen && widgetImageUrl && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3.5 bg-black/85 backdrop-blur-xs animate-in fade-in duration-150">
+        {isWidgetModalOpen && activeWidgetImage && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/85 backdrop-blur-xs animate-in fade-in duration-150">
             <div className="absolute inset-0" onClick={() => setIsWidgetModalOpen(false)} />
 
-            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3.5 z-10 text-zinc-100 max-h-[94vh] flex flex-col">
-              <div className="flex items-center justify-between pb-2 border-b border-zinc-800 shrink-0">
+            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3 z-10 text-zinc-100 max-h-[95vh] flex flex-col">
+              {/* 상단 헤더 */}
+              <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 shrink-0">
                 <div className="flex items-center gap-1.5">
                   <ImageIcon className="w-4 h-4 text-yellow-400" />
                   <h3 className="text-xs font-black text-white">{currentYear}년 {currentMonth}월 1:1 위젯 스케줄</h3>
@@ -3554,56 +3611,98 @@ export default function ERSchedulePage() {
                 </button>
               </div>
 
+              {/* 듀얼 모드 미리보기 전환 탭 */}
+              <div className="mt-2 grid grid-cols-2 gap-1 p-0.5 bg-zinc-950 rounded-xl border border-zinc-800 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setWidgetMode('name')}
+                  className={`py-1.5 text-2xs font-black rounded-lg transition-all flex items-center justify-center gap-1 ${
+                    widgetMode === 'name'
+                      ? 'bg-yellow-400 text-black shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <span>👤 기본 (이름 표기)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWidgetMode('time')}
+                  className={`py-1.5 text-2xs font-black rounded-lg transition-all flex items-center justify-center gap-1 ${
+                    widgetMode === 'time'
+                      ? 'bg-emerald-400 text-emerald-950 shadow-xs'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <span>⏰ 근무 시간 (출근시간)</span>
+                </button>
+              </div>
+
               {/* 저장/공유 성공 피드백 알림 배너 */}
               {saveToPhotosFeedback && (
-                <div className="mt-2 p-2 bg-emerald-950/90 border border-emerald-500/80 rounded-xl flex items-center gap-1.5 text-emerald-300 text-2xs font-extrabold animate-in fade-in shrink-0">
+                <div className="mt-1.5 p-1.5 bg-emerald-950/90 border border-emerald-500/80 rounded-lg flex items-center gap-1.5 text-emerald-300 text-2xs font-extrabold animate-in fade-in shrink-0">
                   <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>{saveToPhotosFeedback}</span>
+                  <span className="truncate">{saveToPhotosFeedback}</span>
                 </div>
               )}
 
               {/* 1:1 정방형 렌더링 이미지 미리보기 프레임 */}
-              <div className="mt-2.5 relative aspect-square w-full rounded-xl overflow-hidden border border-zinc-700 bg-zinc-950 shadow-inner flex items-center justify-center shrink-0">
+              <div className="mt-2 relative aspect-square w-full rounded-xl overflow-hidden border border-zinc-700 bg-zinc-950 shadow-inner flex items-center justify-center shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={widgetImageUrl}
-                  alt={`${currentYear}년 ${currentMonth}월 1:1 위젯 스케줄`}
+                  src={activeWidgetImage.dataUrl}
+                  alt={`${currentYear}년 ${currentMonth}월 1:1 위젯 스케줄 (${widgetMode === 'time' ? '근무시간' : '기본'})`}
                   className="w-full h-full object-contain select-none cursor-pointer"
-                  onClick={handleSaveToPhotosAction}
+                  onClick={() => handleSaveToPhotosAction(widgetMode)}
                   title="탭하여 사진첩에 저장하거나 길게 눌러 저장"
                 />
               </div>
 
               {/* 아이폰 사진첩 바로 저장 안내 박스 */}
-              <div className="mt-2 p-2 bg-zinc-950/90 rounded-xl border border-zinc-800/90 text-2xs text-zinc-400 space-y-1">
-                <p className="text-yellow-400 font-extrabold flex items-center gap-1">
-                  <span>📱 아이폰 사진첩(사진 앱) 바로 저장 방법:</span>
+              <div className="mt-1.5 p-1.5 bg-zinc-950/90 rounded-lg border border-zinc-800/90 text-[10px] text-zinc-400 space-y-0.5">
+                <p className="text-yellow-400 font-extrabold flex items-center gap-1 leading-tight">
+                  <span>📱 사진 앱 저장: 아래 버튼을 눌러 공유 창에서 [이미지 저장]을 탭하세요.</span>
                 </p>
-                <p className="leading-snug">
-                  1. 아래 <b className="text-yellow-300">[📸 사진첩에 이미지 저장]</b> 버튼을 누르면 공유 창이 열립니다. <b className="text-white">&apos;이미지 저장&apos;</b>을 탭하세요.
-                </p>
-                <p className="leading-snug">
-                  2. 또는 위 이미지를 <b className="text-white">1초간 꾹 길게 눌러</b> <b className="text-yellow-300">&apos;사진에 저장&apos;</b>을 탭하셔도 사진첩에 바로 저장됩니다.
+                <p className="leading-tight text-zinc-400">
+                  {widgetMode === 'time' ? (
+                    <span className="text-emerald-300">
+                      • 시간 규칙: 평일 D 06시, M 12시, N 오후 10시 / 주말 D 06시, H 12시, M 오후 2시, N 오후 10시
+                    </span>
+                  ) : (
+                    <span>• 이미지를 1초간 꾹 길게 눌러 &apos;사진에 저장&apos;하셔도 바로 저장됩니다.</span>
+                  )}
                 </p>
               </div>
 
               {/* 하단 액션 버튼 그룹 */}
-              <div className="mt-2.5 pt-2 border-t border-zinc-800 flex flex-col gap-1.5 shrink-0">
-                {/* 메인: 사진첩 저장 버튼 */}
-                <button
-                  type="button"
-                  onClick={handleSaveToPhotosAction}
-                  className="w-full py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>📸 사진첩에 이미지 저장 (공유 시트)</span>
-                </button>
+              <div className="mt-2 pt-1.5 border-t border-zinc-800 flex flex-col gap-1.5 shrink-0">
+                {/* [요구사항 1]: 2개의 듀얼 위젯 저장 버튼 */}
+                <div className="flex flex-col gap-1.5 w-full">
+                  {/* 1) [기본 위젯 이미지 저장] */}
+                  <button
+                    type="button"
+                    onClick={() => handleSaveToPhotosAction('name')}
+                    className="w-full py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+                  >
+                    <Download className="w-4 h-4 text-black" />
+                    <span>📸 [기본 위젯 이미지 저장] (이름 표기)</span>
+                  </button>
 
-                {/* 보조: 파일 직접 다운로드 및 클립보드 복사 */}
-                <div className="flex gap-1.5 w-full">
+                  {/* 2) [근무 시간 위젯 이미지 저장] */}
+                  <button
+                    type="button"
+                    onClick={() => handleSaveToPhotosAction('time')}
+                    className="w-full py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 active:scale-98 text-emerald-950 font-black text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+                  >
+                    <Download className="w-4 h-4 text-emerald-950" />
+                    <span>⏰ [근무 시간 위젯 이미지 저장] (출근시간 표기)</span>
+                  </button>
+                </div>
+
+                {/* 보조 액션 버튼 */}
+                <div className="flex gap-1.5 w-full pt-0.5">
                   <a
-                    href={widgetImageUrl}
-                    download={`ER_Schedule_${currentYear}년_${currentMonth}월_위젯.png`}
+                    href={activeWidgetImage.dataUrl}
+                    download={activeWidgetImage.file.name}
                     className="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-2xs flex items-center justify-center gap-1 transition-colors"
                   >
                     <Download className="w-3 h-3 text-sky-400" />
