@@ -17,7 +17,10 @@ import {
   ShieldCheck,
   ScanFace,
   KeyRound,
-  Save
+  Save,
+  Edit2,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 const FULL_BLEED_ICON_SVG =
@@ -646,6 +649,17 @@ export default function ERSchedulePage() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // [요구사항 1]: 근무 수동 수정 상태
+  const [isEditingDay, setIsEditingDay] = useState<boolean>(false);
+  const [editHolidayNote, setEditHolidayNote] = useState<string>('');
+  const [editShifts, setEditShifts] = useState<{
+    code: ShiftCode;
+    name: string;
+    time: string;
+    workersStr: string;
+  }[]>([]);
+  const [editSaveSuccess, setEditSaveSuccess] = useState<boolean>(false);
+
   // [요구사항 2]: 오늘 날짜(YYYY-MM-DD) 추출 - 1년치 스크롤에서도 오늘 위치를 즉각 식별
   const todayStr = useMemo(() => {
     const now = new Date();
@@ -1123,6 +1137,175 @@ export default function ERSchedulePage() {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // [수동 수정 헬퍼]: 근무조 기본 메타 정보
+  const SHIFT_META_MAP: Record<ShiftCode, { name: string; defaultTime: string }> = {
+    D: { name: '데이', defaultTime: '08:00 - 15:00' },
+    M1: { name: '미드1', defaultTime: '14:00 - 24:00' },
+    M2: { name: '미드2', defaultTime: '14:00 - 24:00' },
+    M: { name: '미드', defaultTime: '14:00 - 24:00' },
+    H: { name: '주말 헬퍼', defaultTime: '14:00 - 23:00' },
+    N: { name: '나이트', defaultTime: '00:00 - 익일 07:30' },
+  };
+
+  // [요구사항 1]: 근무 수동 수정 모드 진입
+  const handleStartEditDay = () => {
+    if (!selectedDay) return;
+    setEditHolidayNote(selectedDay.holidayNote || '');
+    if (selectedDay.shifts && selectedDay.shifts.length > 0) {
+      setEditShifts(
+        selectedDay.shifts.map(s => ({
+          code: s.code,
+          name: s.name,
+          time: s.time,
+          workersStr: s.workers.join(', '),
+        }))
+      );
+    } else {
+      // 근무조가 아예 없던 날인 경우 기본 D, M1, M2, N 템플릿 제공
+      setEditShifts([
+        { code: 'D', name: '데이', time: '08:00 - 15:00', workersStr: '' },
+        { code: 'M1', name: '미드1', time: '14:00 - 24:00', workersStr: '' },
+        { code: 'M2', name: '미드2', time: '14:00 - 24:00', workersStr: '' },
+        { code: 'N', name: '나이트', time: '00:00 - 익일 07:30', workersStr: '' },
+      ]);
+    }
+    setIsEditingDay(true);
+  };
+
+  // 근무조 추가
+  const handleAddShiftSlot = () => {
+    const defaultCode: ShiftCode = 'D';
+    const meta = SHIFT_META_MAP[defaultCode];
+    setEditShifts(prev => [
+      ...prev,
+      {
+        code: defaultCode,
+        name: meta.name,
+        time: meta.defaultTime,
+        workersStr: '',
+      },
+    ]);
+  };
+
+  // 근무조 삭제
+  const handleRemoveShiftSlot = (idx: number) => {
+    setEditShifts(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // 근무조 코드 변경 시 시간 및 이름 자동 동기화
+  const handleShiftCodeChange = (idx: number, newCode: ShiftCode) => {
+    const meta = SHIFT_META_MAP[newCode] || { name: newCode, defaultTime: '' };
+    setEditShifts(prev =>
+      prev.map((s, i) =>
+        i === idx
+          ? {
+              ...s,
+              code: newCode,
+              name: meta.name,
+              time: meta.defaultTime || s.time,
+            }
+          : s
+      )
+    );
+  };
+
+  // 근무자 입력 텍스트 변경
+  const handleWorkersStrChange = (idx: number, val: string) => {
+    setEditShifts(prev =>
+      prev.map((s, i) => (i === idx ? { ...s, workersStr: val } : s))
+    );
+  };
+
+  // 근무자 입력창에 "현우" 원클릭 토글 (있으면 제거, 없으면 추가)
+  const handleToggleHyunwoo = (idx: number) => {
+    setEditShifts(prev =>
+      prev.map((s, i) => {
+        if (i !== idx) return s;
+        const currentWorkers = s.workersStr
+          .split(/[/,\s+&|]+/)
+          .map(w => w.trim())
+          .filter(Boolean)
+          .map(w => (w === '박현우' ? '현우' : w));
+
+        const hasHyunwoo = currentWorkers.includes('현우');
+        let newWorkers: string[];
+        if (hasHyunwoo) {
+          newWorkers = currentWorkers.filter(w => w !== '현우');
+        } else {
+          newWorkers = [...currentWorkers, '현우'];
+        }
+        return {
+          ...s,
+          workersStr: newWorkers.join(', '),
+        };
+      })
+    );
+  };
+
+  // [핵심 1]: 근무 수정 저장 및 LocalStorage 자동 영구 보존
+  const handleSaveDayEdit = () => {
+    if (!selectedDay) return;
+
+    // 근무자 파싱 및 정규화
+    const updatedShifts: ShiftItem[] = editShifts
+      .filter(s => s.workersStr.trim().length > 0 || s.code)
+      .map(s => {
+        const workers = s.workersStr
+          .split(/[/,\s+&|]+/)
+          .map(w => w.trim())
+          .filter(Boolean)
+          .map(w => (w === '박현우' ? '현우' : w));
+
+        const hasTargetUser = workers.some(w => w.includes('현우'));
+        const meta = SHIFT_META_MAP[s.code] || { name: s.name, defaultTime: s.time };
+
+        return {
+          code: s.code,
+          name: meta.name,
+          time: s.time || meta.defaultTime,
+          workers,
+          hasTargetUser,
+        };
+      });
+
+    const hasTargetUser = updatedShifts.some(s => s.hasTargetUser);
+    const holidayNote = editHolidayNote.trim() || null;
+
+    const updatedDay: ParsedDay = {
+      ...selectedDay,
+      holidayNote,
+      shifts: updatedShifts,
+      hasTargetUser,
+      rawText: updatedShifts.map(s => `${s.code} ${s.workers.join('/')}`).join('\n'),
+    };
+
+    // scheduleList 내 해당 날짜 업데이트
+    const updatedList = scheduleList.map(item => {
+      if (item.date === selectedDay.date) {
+        return updatedDay;
+      }
+      return item;
+    });
+
+    if (!scheduleList.some(item => item.date === selectedDay.date)) {
+      updatedList.push(updatedDay);
+    }
+
+    setScheduleList(updatedList);
+
+    // LocalStorage 영구 저장 (새로고침 시에도 완벽 유지)
+    try {
+      localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(updatedList));
+    } catch (err) {
+      console.error('LocalStorage 저장 오류:', err);
+    }
+
+    setSelectedDay(updatedDay);
+    setIsEditingDay(false);
+    setEditSaveSuccess(true);
+    setTimeout(() => setEditSaveSuccess(false), 2000);
   };
 
   // [요구사항 1]: 연속 스크롤 월간 뷰 - 1Y 모드일 때 해당 연도의 1월~12월을 세로로 차곡차곡 연속 렌더링
@@ -1772,126 +1955,339 @@ export default function ERSchedulePage() {
         </main>
 
         {/* ========================================================= */}
-        {/* 4. 상세 모달 (Dialog) - "현우" 포함 시 노란색 Override */}
+        {/* 4. 상세 모달 (Dialog) - 수동 근무 수정 & "현우" 포함 시 노란색 Override */}
         {/* ========================================================= */}
         {selectedDay && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150">
-            <div className="absolute inset-0" onClick={() => setSelectedDay(null)} />
+            <div 
+              className="absolute inset-0" 
+              onClick={() => {
+                setSelectedDay(null);
+                setIsEditingDay(false);
+              }} 
+            />
 
-            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-5 z-10 animate-in zoom-in-95 duration-150 text-zinc-100">
-              <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-base font-black text-white">
-                      {selectedDay.date}
+            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-5 z-10 animate-in zoom-in-95 duration-150 text-zinc-100 max-h-[88vh] flex flex-col">
+              {/* 상단 모달 헤더 */}
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-800 shrink-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-base font-black text-white">
+                    {selectedDay.date}
+                  </span>
+                  {selectedDay.date === todayStr && (
+                    <span className="text-[10px] font-black text-emerald-950 bg-emerald-400 px-2 py-0.5 rounded-full shadow-xs">
+                      오늘
                     </span>
-                    {selectedDay.date === todayStr && (
-                      <span className="text-[10px] font-black text-emerald-950 bg-emerald-400 px-2 py-0.5 rounded-full shadow-xs">
-                        오늘
-                      </span>
-                    )}
-                    {selectedDay.holidayNote && (
-                      <span className="text-xs font-bold text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded-full border border-rose-900">
-                        {selectedDay.holidayNote}
-                      </span>
-                    )}
-                  </div>
+                  )}
+                  {!isEditingDay && selectedDay.holidayNote && (
+                    <span className="text-xs font-bold text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded-full border border-rose-900">
+                      {selectedDay.holidayNote}
+                    </span>
+                  )}
+                  {isEditingDay && (
+                    <span className="text-[10px] font-extrabold text-yellow-400 bg-yellow-400/10 border border-yellow-400/40 px-2 py-0.5 rounded-md">
+                      수정 모드
+                    </span>
+                  )}
                 </div>
 
-                <button
-                  onClick={() => setSelectedDay(null)}
-                  className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {!isEditingDay ? (
+                    <button
+                      type="button"
+                      onClick={handleStartEditDay}
+                      className="flex items-center gap-1 text-2xs font-bold px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-zinc-700 transition-all active:scale-95 shadow-xs"
+                      title="근무 수동 수정"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>수정</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDay(false)}
+                      className="text-2xs font-bold px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-colors"
+                    >
+                      취소
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDay(null);
+                      setIsEditingDay(false);
+                    }}
+                    className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
-              {selectedDay.hasTargetUser && (
-                <div className="mt-3 p-2.5 bg-yellow-400/10 border border-yellow-400/40 rounded-xl flex items-center gap-2 text-yellow-400">
-                  <Sparkles className="w-4 h-4 fill-yellow-400 shrink-0" />
-                  <span className="text-xs font-extrabold">
-                    현우 당직 근무일입니다.
-                  </span>
+              {/* 저장 성공 피드백 배너 */}
+              {editSaveSuccess && (
+                <div className="mt-2.5 p-2 bg-emerald-950/80 border border-emerald-500/80 rounded-xl flex items-center justify-center gap-1.5 text-emerald-300 text-xs font-extrabold animate-in fade-in shrink-0">
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span>근무 수정 사항이 영구 저장되었습니다!</span>
                 </div>
               )}
 
-              {/* 근무조별 섹션 리스트 */}
-              <div className="mt-3.5 space-y-2">
-                {selectedDay.shifts.map((shift, idx) => {
-                  const hasHyunwoo = shift.hasTargetUser;
+              {/* [분기 1]: ✏️ 근무 수동 수정(편집) 폼 */}
+              {isEditingDay ? (
+                <div className="mt-3.5 space-y-3.5 overflow-y-auto pr-1 flex-1">
+                  {/* 공휴일 / 메모 입력란 */}
+                  <div>
+                    <label className="text-2xs font-bold text-zinc-400 block mb-1">
+                      공휴일 / 특이사항 메모
+                    </label>
+                    <input
+                      type="text"
+                      value={editHolidayNote}
+                      onChange={(e) => setEditHolidayNote(e.target.value)}
+                      placeholder="예: 추석연휴, 대체공휴일, 당직교체 등"
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-400"
+                    />
+                  </div>
 
-                  // [요구사항 2]: 화면에는 M1, M2 대신 무조건 'M'으로 표기
-                  const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
-                  const displayName = (shift.code === 'M1' || shift.code === 'M2') ? '미드' : shift.name;
-
-                  // [요구사항 3]: 팝업(모달)에서도 다른 근무자들은 색상 없이 다크 모드 무채색으로 통일!
-                  let cardTheme = 'bg-zinc-950/80 border-zinc-800 text-zinc-300';
-                  let codeBadgeTheme = 'bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold';
-                  let workerTagTheme = 'bg-zinc-900/60 border border-zinc-800 text-zinc-400';
-
-                  // [요구사항 3]: "현우"가 포함된 섹션 전체를 노란색(#fde047), 글씨 검은색, 볼드 + 가운데 정렬!
-                  if (hasHyunwoo) {
-                    cardTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-lg text-center';
-                    codeBadgeTheme = 'bg-black text-[#fde047] font-black';
-                    workerTagTheme = 'bg-black/15 text-black font-extrabold border border-black/20';
-                  }
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-xl border text-xs transition-all ${cardTheme}`}
-                    >
-                      {/* 상단 근무조 코드 및 시간 - 현우 포함 시 가운데 정렬 */}
-                      <div className={`flex items-center mb-1.5 ${hasHyunwoo ? 'justify-center gap-3' : 'justify-between'}`}>
-                        <div className="flex items-center gap-1.5 font-bold">
-                          <span className={`px-1.5 py-0.2 rounded text-2xs font-black ${codeBadgeTheme}`}>
-                            {displayCode}
-                          </span>
-                          <span className="font-extrabold">{displayName}</span>
-                        </div>
-                        <span className={`text-2xs ${hasHyunwoo ? 'text-black/80 font-bold' : 'text-zinc-400'}`}>
-                          {shift.time}
-                        </span>
-                      </div>
-
-                      {/* 근무자 태그 목록 - 현우 포함 시 justify-center 가운데 정렬 */}
-                      <div className={`flex flex-wrap items-center gap-1.5 pt-1.5 border-t ${hasHyunwoo ? 'border-black/15 justify-center' : 'border-zinc-800/60 justify-start'}`}>
-                        {shift.workers.map((worker, wIdx) => {
-                          const isMe = worker === '현우';
-                          return (
-                            <span
-                              key={wIdx}
-                              className={`px-2.5 py-0.5 rounded text-xs font-semibold no-underline ${
-                                isMe && hasHyunwoo
-                                  ? 'bg-black text-yellow-400 font-black shadow-sm'
-                                  : workerTagTheme
-                              }`}
-                            >
-                              {worker}
-                            </span>
-                          );
-                        })}
-                      </div>
+                  {/* 각 근무조 편집 리스트 */}
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-2xs font-bold text-zinc-400">근무조 편성</span>
+                      <button
+                        type="button"
+                        onClick={handleAddShiftSlot}
+                        className="flex items-center gap-1 text-2xs font-bold text-yellow-400 hover:text-yellow-300 bg-yellow-400/10 hover:bg-yellow-400/20 px-2 py-0.5 rounded-lg border border-yellow-400/40 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>근무조 추가</span>
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
 
-              <div className="mt-4 pt-3 border-t border-zinc-800 flex gap-2">
-                <button
-                  onClick={handleCopySchedule}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-extrabold text-xs transition-all shadow-md"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-                  <span>{copied ? '복사 완료!' : '일정 텍스트 복사'}</span>
-                </button>
-                <button
-                  onClick={() => setSelectedDay(null)}
-                  className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
-                >
-                  닫기
-                </button>
-              </div>
+                    {editShifts.map((shift, idx) => {
+                      const hasHyunwoo = shift.workersStr.includes('현우');
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-xl border transition-all ${
+                            hasHyunwoo
+                              ? 'bg-zinc-950 border-yellow-400/80 shadow-xs'
+                              : 'bg-zinc-950/70 border-zinc-800'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            {/* 근무 코드 select 드롭다운 & 시간 input */}
+                            <div className="flex items-center gap-1.5 flex-1">
+                              <select
+                                value={shift.code}
+                                onChange={(e) => handleShiftCodeChange(idx, e.target.value as ShiftCode)}
+                                className="bg-zinc-900 border border-zinc-700 text-white text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-yellow-400 cursor-pointer"
+                              >
+                                <option value="D">D (데이)</option>
+                                <option value="M1">M1 (미드1)</option>
+                                <option value="M2">M2 (미드2)</option>
+                                <option value="M">M (미드)</option>
+                                <option value="H">H (헬퍼)</option>
+                                <option value="N">N (나이트)</option>
+                              </select>
+
+                              <input
+                                type="text"
+                                value={shift.time}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setEditShifts(prev => prev.map((s, i) => i === idx ? { ...s, time: val } : s));
+                                }}
+                                placeholder="08:00 - 15:00"
+                                className="bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1 text-2xs text-zinc-400 flex-1 focus:outline-none focus:border-yellow-400"
+                              />
+                            </div>
+
+                            {/* 근무조 삭제 버튼 */}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveShiftSlot(idx)}
+                              className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-zinc-900 transition-colors shrink-0"
+                              title="근무조 삭제"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* 근무자 이름 입력창 */}
+                          <div className="space-y-1.5">
+                            <input
+                              type="text"
+                              value={shift.workersStr}
+                              onChange={(e) => handleWorkersStrChange(idx, e.target.value)}
+                              placeholder="근무자 이름 입력 (예: 현우, 민준)"
+                              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-400 font-medium"
+                            />
+
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[10px] text-zinc-500">
+                                쉼표(,) 또는 슬래시(/) 구분
+                              </span>
+
+                              {/* [대타 지원]: 현우 원클릭 토글 퀵 버튼 */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleHyunwoo(idx)}
+                                className={`flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all border shrink-0 ${
+                                  hasHyunwoo
+                                    ? 'bg-yellow-400 text-black border-yellow-400 shadow-xs'
+                                    : 'bg-zinc-900 hover:bg-zinc-800 text-yellow-400 border-zinc-700'
+                                }`}
+                                title="현우 포함 여부 원클릭 변경"
+                              >
+                                <Sparkles className="w-2.5 h-2.5" />
+                                <span>{hasHyunwoo ? '✓ 현우 포함됨 (제거)' : '+ 현우 대타 추가'}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {editShifts.length === 0 && (
+                      <div className="p-4 rounded-xl border border-dashed border-zinc-800 text-center text-zinc-500 text-xs">
+                        등록된 근무조가 없습니다. [근무조 추가]를 눌러 편성하세요.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 편집 모드 하단 저장 및 취소 버튼 바 */}
+                  <div className="pt-2 flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDay(false)}
+                      className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveDayEdit}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-extrabold text-xs transition-all shadow-md"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>수정 사항 저장</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* [분기 2]: 👁️ 기존 뷰 모드 */
+                <div className="mt-3.5 space-y-2 overflow-y-auto pr-1 flex-1">
+                  {selectedDay.hasTargetUser && (
+                    <div className="p-2.5 bg-yellow-400/10 border border-yellow-400/40 rounded-xl flex items-center gap-2 text-yellow-400">
+                      <Sparkles className="w-4 h-4 fill-yellow-400 shrink-0" />
+                      <span className="text-xs font-extrabold">
+                        현우 당직 근무일입니다.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* 근무조별 섹션 리스트 */}
+                  <div className="space-y-2">
+                    {selectedDay.shifts.map((shift, idx) => {
+                      const hasHyunwoo = shift.hasTargetUser;
+
+                      // [요구사항 2]: 화면에는 M1, M2 대신 무조건 'M'으로 표기
+                      const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
+                      const displayName = (shift.code === 'M1' || shift.code === 'M2') ? '미드' : shift.name;
+
+                      // [요구사항 3]: 팝업(모달)에서도 다른 근무자들은 색상 없이 다크 모드 무채색으로 통일!
+                      let cardTheme = 'bg-zinc-950/80 border-zinc-800 text-zinc-300';
+                      let codeBadgeTheme = 'bg-zinc-900 border border-zinc-800 text-zinc-400 font-bold';
+                      let workerTagTheme = 'bg-zinc-900/60 border border-zinc-800 text-zinc-400';
+
+                      // [요구사항 3]: "현우"가 포함된 섹션 전체를 노란색(#fde047), 글씨 검은색, 볼드 + 가운데 정렬!
+                      if (hasHyunwoo) {
+                        cardTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-lg text-center';
+                        codeBadgeTheme = 'bg-black text-[#fde047] font-black';
+                        workerTagTheme = 'bg-black/15 text-black font-extrabold border border-black/20';
+                      }
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-xl border text-xs transition-all ${cardTheme}`}
+                        >
+                          {/* 상단 근무조 코드 및 시간 - 현우 포함 시 가운데 정렬 */}
+                          <div className={`flex items-center mb-1.5 ${hasHyunwoo ? 'justify-center gap-3' : 'justify-between'}`}>
+                            <div className="flex items-center gap-1.5 font-bold">
+                              <span className={`px-1.5 py-0.2 rounded text-2xs font-black ${codeBadgeTheme}`}>
+                                {displayCode}
+                              </span>
+                              <span className="font-extrabold">{displayName}</span>
+                            </div>
+                            <span className={`text-2xs ${hasHyunwoo ? 'text-black/80 font-bold' : 'text-zinc-400'}`}>
+                              {shift.time}
+                            </span>
+                          </div>
+
+                          {/* 근무자 태그 목록 - 현우 포함 시 justify-center 가운데 정렬 */}
+                          <div className={`flex flex-wrap items-center gap-1.5 pt-1.5 border-t ${hasHyunwoo ? 'border-black/15 justify-center' : 'border-zinc-800/60 justify-start'}`}>
+                            {shift.workers.map((worker, wIdx) => {
+                              const isMe = worker === '현우';
+                              return (
+                                <span
+                                  key={wIdx}
+                                  className={`px-2.5 py-0.5 rounded text-xs font-semibold no-underline ${
+                                    isMe && hasHyunwoo
+                                      ? 'bg-black text-yellow-400 font-black shadow-sm'
+                                      : workerTagTheme
+                                  }`}
+                                >
+                                  {worker}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {(!selectedDay.shifts || selectedDay.shifts.length === 0) && (
+                      <div className="p-4 rounded-xl border border-dashed border-zinc-800 text-center text-zinc-500 text-xs">
+                        등록된 근무가 없습니다. [수정] 버튼을 눌러 근무를 입력하세요.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 뷰 모드 하단 액션 버튼 바 */}
+                  <div className="mt-4 pt-3 border-t border-zinc-800 flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleStartEditDay}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-yellow-400 font-bold text-xs border border-zinc-700 transition-all active:scale-98 shadow-sm"
+                      title="근무 수동 수정"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>수정</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopySchedule}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-extrabold text-xs transition-all shadow-md"
+                    >
+                      {copied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+                      <span>{copied ? '복사 완료!' : '일정 복사'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDay(null);
+                        setIsEditingDay(false);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
