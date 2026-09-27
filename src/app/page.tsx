@@ -2209,25 +2209,25 @@ export default function ERSchedulePage() {
               }} 
             />
 
-            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-5 z-10 animate-in zoom-in-95 duration-150 text-zinc-100 max-h-[88vh] flex flex-col">
+            <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3.5 z-10 animate-in zoom-in-95 duration-150 text-zinc-100 max-h-[90vh] flex flex-col">
               {/* 상단 모달 헤더 */}
-              <div className="flex items-center justify-between pb-3 border-b border-zinc-800 shrink-0">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-800 shrink-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-base font-black text-white">
+                  <span className="text-sm font-black text-white">
                     {selectedDay.date}
                   </span>
                   {selectedDay.date === todayStr && (
-                    <span className="text-[10px] font-black text-emerald-950 bg-emerald-400 px-2 py-0.5 rounded-full shadow-xs">
+                    <span className="text-[9px] font-black text-emerald-950 bg-emerald-400 px-1.5 py-0.5 rounded-full shadow-xs">
                       오늘
                     </span>
                   )}
                   {!isEditingDay && selectedDay.holidayNote && (
-                    <span className="text-xs font-bold text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded-full border border-rose-900">
+                    <span className="text-[10px] font-bold text-rose-400 bg-rose-950/80 px-1.5 py-0.5 rounded-full border border-rose-900">
                       {selectedDay.holidayNote}
                     </span>
                   )}
                   {isEditingDay && (
-                    <span className="text-[10px] font-extrabold text-yellow-400 bg-yellow-400/10 border border-yellow-400/40 px-2 py-0.5 rounded-md">
+                    <span className="text-[9px] font-extrabold text-yellow-400 bg-yellow-400/10 border border-yellow-400/40 px-1.5 py-0.5 rounded-md">
                       수정 모드
                     </span>
                   )}
@@ -2238,10 +2238,10 @@ export default function ERSchedulePage() {
                     <button
                       type="button"
                       onClick={handleStartEditDay}
-                      className="flex items-center gap-1 text-2xs font-bold px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-zinc-700 transition-all active:scale-95 shadow-xs"
+                      className="flex items-center gap-1 text-2xs font-bold px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-zinc-700 transition-all active:scale-95 shadow-xs"
                       title="근무 수동 수정"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <Edit2 className="w-3 h-3" />
                       <span>수정</span>
                     </button>
                   ) : (
@@ -2262,46 +2262,46 @@ export default function ERSchedulePage() {
                     }}
                     className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
                   >
-                    <X className="w-5 h-5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
               {/* 저장 성공 피드백 배너 */}
               {editSaveSuccess && (
-                <div className="mt-2.5 p-2 bg-emerald-950/80 border border-emerald-500/80 rounded-xl flex items-center justify-center gap-1.5 text-emerald-300 text-xs font-extrabold animate-in fade-in shrink-0">
-                  <Check className="w-4 h-4 text-emerald-400" />
+                <div className="mt-1.5 p-1.5 bg-emerald-950/80 border border-emerald-500/80 rounded-lg flex items-center justify-center gap-1 text-emerald-300 text-2xs font-extrabold animate-in fade-in shrink-0">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span>근무 수정 사항이 영구 저장되었습니다!</span>
                 </div>
               )}
 
               {/* [분기 1]: ✏️ 근무 수동 수정(편집) 폼 */}
               {isEditingDay ? (
-                <div className="mt-3.5 space-y-3.5 overflow-y-auto pr-1 flex-1">
+                <div className="mt-2 space-y-2 overflow-y-auto pr-1 flex-1">
                   {/* 공휴일 / 메모 입력란 */}
                   <div>
-                    <label className="text-2xs font-bold text-zinc-400 block mb-1">
+                    <label className="text-[10px] font-bold text-zinc-400 block mb-0.5">
                       공휴일 / 특이사항 메모
                     </label>
                     <input
                       type="text"
                       value={editHolidayNote}
                       onChange={(e) => setEditHolidayNote(e.target.value)}
-                      placeholder="예: 추석연휴, 대체공휴일, 당직교체 등"
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-400"
+                      placeholder="예: 추석연휴, 대체공휴일 등"
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-400"
                     />
                   </div>
 
                   {/* 각 근무조 편집 리스트 */}
-                  <div className="space-y-2.5">
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-2xs font-bold text-zinc-400">근무조 편성</span>
+                      <span className="text-[10px] font-bold text-zinc-400">근무조 편성</span>
                       <button
                         type="button"
                         onClick={handleAddShiftSlot}
-                        className="flex items-center gap-1 text-2xs font-bold text-yellow-400 hover:text-yellow-300 bg-yellow-400/10 hover:bg-yellow-400/20 px-2 py-0.5 rounded-lg border border-yellow-400/40 transition-colors"
+                        className="flex items-center gap-1 text-[10px] font-bold text-yellow-400 hover:text-yellow-300 bg-yellow-400/10 hover:bg-yellow-400/20 px-2 py-0.5 rounded-md border border-yellow-400/40 transition-colors"
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className="w-2.5 h-2.5" />
                         <span>근무조 추가</span>
                       </button>
                     </div>
@@ -2312,19 +2312,19 @@ export default function ERSchedulePage() {
                       return (
                         <div
                           key={idx}
-                          className={`p-3 rounded-xl border transition-all ${
+                          className={`p-2 rounded-xl border transition-all ${
                             hasHyunwoo
                               ? 'bg-zinc-950 border-yellow-400/80 shadow-xs'
                               : 'bg-zinc-950/70 border-zinc-800'
                           }`}
                         >
-                          <div className="flex items-center justify-between gap-2 mb-2">
-                            {/* 근무 코드 select 드롭다운 & 시간 input */}
-                            <div className="flex items-center gap-1.5 flex-1">
+                          {/* Row 1: 코드 select + 시간 input + 현우 토글 버튼 + 삭제 버튼 */}
+                          <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                            <div className="flex items-center gap-1 flex-1 min-w-0">
                               <select
                                 value={shift.code}
                                 onChange={(e) => handleShiftCodeChange(idx, e.target.value as ShiftCode)}
-                                className="bg-zinc-900 border border-zinc-700 text-white text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-yellow-400 cursor-pointer"
+                                className="bg-zinc-900 border border-zinc-700 text-white text-xs font-black rounded-md px-1.5 py-0.5 focus:outline-none focus:border-yellow-400 cursor-pointer shrink-0"
                               >
                                 <option value="D">D (데이)</option>
                                 <option value="M1">M1 (미드1)</option>
@@ -2342,41 +2342,16 @@ export default function ERSchedulePage() {
                                   setEditShifts(prev => prev.map((s, i) => i === idx ? { ...s, time: val } : s));
                                 }}
                                 placeholder="08:00 - 15:00"
-                                className="bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1 text-2xs text-zinc-400 flex-1 focus:outline-none focus:border-yellow-400"
+                                className="bg-zinc-900 border border-zinc-800 rounded-md px-1.5 py-0.5 text-2xs text-zinc-400 flex-1 min-w-[70px] focus:outline-none focus:border-yellow-400"
                               />
                             </div>
 
-                            {/* 근무조 삭제 버튼 */}
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveShiftSlot(idx)}
-                              className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-zinc-900 transition-colors shrink-0"
-                              title="근무조 삭제"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-
-                          {/* 근무자 이름 입력창 */}
-                          <div className="space-y-1.5">
-                            <input
-                              type="text"
-                              value={shift.workersStr}
-                              onChange={(e) => handleWorkersStrChange(idx, e.target.value)}
-                              placeholder="근무자 이름 입력 (예: 현우, 민준)"
-                              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-400 font-medium"
-                            />
-
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="text-[10px] text-zinc-500">
-                                쉼표(,) 또는 슬래시(/) 구분
-                              </span>
-
+                            <div className="flex items-center gap-1 shrink-0">
                               {/* [대타 지원]: 현우 원클릭 토글 퀵 버튼 */}
                               <button
                                 type="button"
                                 onClick={() => handleToggleHyunwoo(idx)}
-                                className={`flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all border shrink-0 ${
+                                className={`flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-md transition-all border shrink-0 ${
                                   hasHyunwoo
                                     ? 'bg-yellow-400 text-black border-yellow-400 shadow-xs'
                                     : 'bg-zinc-900 hover:bg-zinc-800 text-yellow-400 border-zinc-700'
@@ -2384,46 +2359,67 @@ export default function ERSchedulePage() {
                                 title="현우 포함 여부 원클릭 변경"
                               >
                                 <Sparkles className="w-2.5 h-2.5" />
-                                <span>{hasHyunwoo ? '✓ 현우 포함됨 (제거)' : '+ 현우 대타 추가'}</span>
+                                <span>{hasHyunwoo ? '현우✓' : '+현우'}</span>
+                              </button>
+
+                              {/* 근무조 삭제 버튼 */}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveShiftSlot(idx)}
+                                className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-zinc-900 transition-colors shrink-0"
+                                title="근무조 삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
+                          </div>
+
+                          {/* Row 2: 근무자 이름 입력창 */}
+                          <div>
+                            <input
+                              type="text"
+                              value={shift.workersStr}
+                              onChange={(e) => handleWorkersStrChange(idx, e.target.value)}
+                              placeholder="근무자 이름 (예: 현우, 민준)"
+                              className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-400 font-medium"
+                            />
                           </div>
                         </div>
                       );
                     })}
 
                     {editShifts.length === 0 && (
-                      <div className="p-4 rounded-xl border border-dashed border-zinc-800 text-center text-zinc-500 text-xs">
-                        등록된 근무조가 없습니다. [근무조 추가]를 눌러 편성하세요.
+                      <div className="p-3 rounded-xl border border-dashed border-zinc-800 text-center text-zinc-500 text-xs">
+                        등록된 근무조가 없습니다. [근무조 추가]를 누르세요.
                       </div>
                     )}
                   </div>
 
                   {/* 편집 모드 하단 저장 및 취소 버튼 바 */}
-                  <div className="pt-2 flex gap-2 shrink-0">
+                  <div className="pt-1.5 flex gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => setIsEditingDay(false)}
-                      className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
+                      className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
                     >
                       취소
                     </button>
                     <button
                       type="button"
                       onClick={handleSaveDayEdit}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-extrabold text-xs transition-all shadow-md"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-extrabold text-xs transition-all shadow-md"
                     >
-                      <Save className="w-4 h-4" />
+                      <Save className="w-3.5 h-3.5" />
                       <span>수정 사항 저장</span>
                     </button>
                   </div>
                 </div>
               ) : (
                 /* [분기 2]: 👁️ 기존 뷰 모드 */
-                <div className="mt-3.5 space-y-2 overflow-y-auto pr-1 flex-1">
+                <div className="mt-2 space-y-1.5 overflow-y-auto pr-1 flex-1">
                   {selectedDay.hasTargetUser && (
-                    <div className="p-2.5 bg-yellow-400/10 border border-yellow-400/40 rounded-xl flex items-center gap-2 text-yellow-400">
-                      <Sparkles className="w-4 h-4 fill-yellow-400 shrink-0" />
+                    <div className="p-1.5 px-2.5 bg-yellow-400/10 border border-yellow-400/40 rounded-lg flex items-center gap-1.5 text-yellow-400">
+                      <Sparkles className="w-3.5 h-3.5 fill-yellow-400 shrink-0" />
                       <span className="text-xs font-extrabold">
                         현우 당직 근무일입니다.
                       </span>
@@ -2431,7 +2427,7 @@ export default function ERSchedulePage() {
                   )}
 
                   {/* 근무조별 섹션 리스트 */}
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     {selectedDay.shifts.map((shift, idx) => {
                       const hasHyunwoo = shift.hasTargetUser;
 
@@ -2446,7 +2442,7 @@ export default function ERSchedulePage() {
 
                       // [요구사항 3]: "현우"가 포함된 섹션 전체를 노란색(#fde047), 글씨 검은색, 볼드 + 가운데 정렬!
                       if (hasHyunwoo) {
-                        cardTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-lg text-center';
+                        cardTheme = 'bg-[#fde047] border-yellow-400 text-black font-bold shadow-md text-center';
                         codeBadgeTheme = 'bg-black text-[#fde047] font-black';
                         workerTagTheme = 'bg-black/15 text-black font-extrabold border border-black/20';
                       }
@@ -2454,10 +2450,10 @@ export default function ERSchedulePage() {
                       return (
                         <div
                           key={idx}
-                          className={`p-3 rounded-xl border text-xs transition-all ${cardTheme}`}
+                          className={`p-2 px-2.5 rounded-xl border text-xs transition-all ${cardTheme}`}
                         >
                           {/* 상단 근무조 코드 및 시간 - 현우 포함 시 가운데 정렬 */}
-                          <div className={`flex items-center mb-1.5 ${hasHyunwoo ? 'justify-center gap-3' : 'justify-between'}`}>
+                          <div className={`flex items-center mb-1 ${hasHyunwoo ? 'justify-center gap-2' : 'justify-between'}`}>
                             <div className="flex items-center gap-1.5 font-bold">
                               <span className={`px-1.5 py-0.2 rounded text-2xs font-black ${codeBadgeTheme}`}>
                                 {displayCode}
@@ -2470,15 +2466,15 @@ export default function ERSchedulePage() {
                           </div>
 
                           {/* 근무자 태그 목록 - 현우 포함 시 justify-center 가운데 정렬 */}
-                          <div className={`flex flex-wrap items-center gap-1.5 pt-1.5 border-t ${hasHyunwoo ? 'border-black/15 justify-center' : 'border-zinc-800/60 justify-start'}`}>
+                          <div className={`flex flex-wrap items-center gap-1 pt-1 border-t ${hasHyunwoo ? 'border-black/15 justify-center' : 'border-zinc-800/60 justify-start'}`}>
                             {shift.workers.map((worker, wIdx) => {
                               const isMe = worker === '현우';
                               return (
                                 <span
                                   key={wIdx}
-                                  className={`px-2.5 py-0.5 rounded text-xs font-semibold no-underline ${
+                                  className={`px-2 py-0.5 rounded text-xs font-semibold no-underline ${
                                     isMe && hasHyunwoo
-                                      ? 'bg-black text-yellow-400 font-black shadow-sm'
+                                      ? 'bg-black text-yellow-400 font-black shadow-xs'
                                       : workerTagTheme
                                   }`}
                                 >
@@ -2492,27 +2488,27 @@ export default function ERSchedulePage() {
                     })}
 
                     {(!selectedDay.shifts || selectedDay.shifts.length === 0) && (
-                      <div className="p-4 rounded-xl border border-dashed border-zinc-800 text-center text-zinc-500 text-xs">
+                      <div className="p-3 rounded-xl border border-dashed border-zinc-800 text-center text-zinc-500 text-xs">
                         등록된 근무가 없습니다. [수정] 버튼을 눌러 근무를 입력하세요.
                       </div>
                     )}
                   </div>
 
                   {/* 뷰 모드 하단 액션 버튼 바 */}
-                  <div className="mt-4 pt-3 border-t border-zinc-800 flex gap-2 shrink-0">
+                  <div className="mt-2.5 pt-2 border-t border-zinc-800 flex gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={handleStartEditDay}
-                      className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-yellow-400 font-bold text-xs border border-zinc-700 transition-all active:scale-98 shadow-sm"
+                      className="flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-yellow-400 font-bold text-xs border border-zinc-700 transition-all active:scale-98 shadow-sm"
                       title="근무 수동 수정"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <Edit2 className="w-3 h-3" />
                       <span>수정</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleCopySchedule}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-extrabold text-xs transition-all shadow-md"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 active:scale-98 text-black font-extrabold text-xs transition-all shadow-md"
                     >
                       {copied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
                       <span>{copied ? '복사 완료!' : '일정 복사'}</span>
@@ -2523,7 +2519,7 @@ export default function ERSchedulePage() {
                         setSelectedDay(null);
                         setIsEditingDay(false);
                       }}
-                      className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
+                      className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold transition-colors"
                     >
                       닫기
                     </button>
