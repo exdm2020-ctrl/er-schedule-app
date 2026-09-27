@@ -1819,27 +1819,27 @@ export default function ERSchedulePage() {
         {/* 헤더(ER Schedule), 날짜("2026년 9월"), 타임프레임 탭(Now, 1M, 1Y), 업로드/저장/동기화 버튼 일체형 고정 */}
         {/* ========================================================= */}
         <div className="sticky top-0 z-50 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 shadow-md transition-all">
-          {/* 1. 상단 심플 헤더: [ER Schedule] 로고 및 버튼 */}
-          <header className="pt-safe px-4 pt-3 pb-2 flex items-center justify-between border-b border-zinc-900/80">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-1.5">
+          {/* 1. 상단 심플 헤더: [ER Schedule] 로고 및 버튼 (완벽한 1줄 정렬 유지) */}
+          <header className="pt-safe px-3 sm:px-4 pt-2.5 pb-2 flex items-center justify-between border-b border-zinc-900/80 flex-nowrap gap-2 overflow-hidden">
+            <h1 className="text-lg sm:text-2xl font-black tracking-tight text-white flex items-center gap-1 shrink-0 whitespace-nowrap">
               ER Schedule
             </h1>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 flex-nowrap">
               {/* [요구사항 1]: 기기 간 동기화 & 백업 모달 열기 버튼 */}
               <button
                 onClick={() => setIsSyncModalOpen(true)}
-                className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl border transition-all shadow-sm active:scale-95 bg-zinc-900 hover:bg-zinc-800 text-sky-400 border-zinc-700 hover:border-sky-400/60"
+                className="flex items-center gap-1 text-2xs sm:text-xs font-bold px-2 py-1.5 sm:px-2.5 rounded-lg sm:rounded-xl border transition-all shadow-sm active:scale-95 bg-zinc-900 hover:bg-zinc-800 text-sky-400 border-zinc-700 hover:border-sky-400/60 shrink-0 whitespace-nowrap"
                 title="기기 간 데이터 동기화 & 백업"
               >
-                <Cloud className="w-3.5 h-3.5 text-sky-400" />
+                <Cloud className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                 <span className="text-zinc-200">동기화</span>
               </button>
 
               {/* [요구사항 1]: 수동 저장 버튼 */}
               <button
                 onClick={handleManualSave}
-                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition-all shadow-sm active:scale-95 ${
+                className={`flex items-center gap-1 text-2xs sm:text-xs font-bold px-2 py-1.5 sm:px-3 rounded-lg sm:rounded-xl border transition-all shadow-sm active:scale-95 shrink-0 whitespace-nowrap ${
                   saveSuccess
                     ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
                     : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-700'
@@ -1848,12 +1848,12 @@ export default function ERSchedulePage() {
               >
                 {saveSuccess ? (
                   <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                     <span>저장됨</span>
                   </>
                 ) : (
                   <>
-                    <Save className="w-3.5 h-3.5 text-yellow-400" />
+                    <Save className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
                     <span>저장</span>
                   </>
                 )}
@@ -1862,10 +1862,10 @@ export default function ERSchedulePage() {
               {/* 엑셀 업로드 버튼 */}
               <button
                 onClick={() => setIsUploadOpen(true)}
-                className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-100 text-xs font-bold px-3 py-1.5 rounded-xl border border-zinc-700 transition-all shadow-sm"
+                className="flex items-center gap-1 bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-zinc-100 text-2xs sm:text-xs font-bold px-2 py-1.5 sm:px-3 rounded-lg sm:rounded-xl border border-zinc-700 transition-all shadow-sm shrink-0 whitespace-nowrap"
               >
-                <Upload className="w-3.5 h-3.5 text-yellow-400" />
-                <span>엑셀 업로드</span>
+                <Upload className="w-3.5 h-3.5 text-yellow-400 shrink-0" />
+                <span><span className="hidden sm:inline">엑셀 </span>업로드</span>
               </button>
             </div>
           </header>
@@ -2210,35 +2210,35 @@ export default function ERSchedulePage() {
             />
 
             <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3.5 z-10 animate-in zoom-in-95 duration-150 text-zinc-100 max-h-[90vh] flex flex-col">
-              {/* 상단 모달 헤더 */}
-              <div className="flex items-center justify-between pb-2 border-b border-zinc-800 shrink-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-sm font-black text-white">
+              {/* 상단 모달 헤더 (완벽한 1줄 정렬 유지) */}
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-800 shrink-0 flex-nowrap gap-1.5 overflow-hidden">
+                <div className="flex items-center gap-1.5 flex-nowrap min-w-0 overflow-hidden">
+                  <span className="text-sm font-black text-white shrink-0 whitespace-nowrap">
                     {selectedDay.date}
                   </span>
                   {selectedDay.date === todayStr && (
-                    <span className="text-[9px] font-black text-emerald-950 bg-emerald-400 px-1.5 py-0.5 rounded-full shadow-xs">
+                    <span className="text-[9px] font-black text-emerald-950 bg-emerald-400 px-1.5 py-0.5 rounded-full shadow-xs shrink-0 whitespace-nowrap">
                       오늘
                     </span>
                   )}
                   {!isEditingDay && selectedDay.holidayNote && (
-                    <span className="text-[10px] font-bold text-rose-400 bg-rose-950/80 px-1.5 py-0.5 rounded-full border border-rose-900">
+                    <span className="text-[10px] font-bold text-rose-400 bg-rose-950/80 px-1.5 py-0.5 rounded-full border border-rose-900 shrink-0 truncate max-w-[90px]">
                       {selectedDay.holidayNote}
                     </span>
                   )}
                   {isEditingDay && (
-                    <span className="text-[9px] font-extrabold text-yellow-400 bg-yellow-400/10 border border-yellow-400/40 px-1.5 py-0.5 rounded-md">
+                    <span className="text-[9px] font-extrabold text-yellow-400 bg-yellow-400/10 border border-yellow-400/40 px-1.5 py-0.5 rounded-md shrink-0 whitespace-nowrap">
                       수정 모드
                     </span>
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 shrink-0 flex-nowrap">
                   {!isEditingDay ? (
                     <button
                       type="button"
                       onClick={handleStartEditDay}
-                      className="flex items-center gap-1 text-2xs font-bold px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-zinc-700 transition-all active:scale-95 shadow-xs"
+                      className="flex items-center gap-1 text-2xs font-bold px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-zinc-700 transition-all active:scale-95 shadow-xs shrink-0 whitespace-nowrap"
                       title="근무 수동 수정"
                     >
                       <Edit2 className="w-3 h-3" />
@@ -2248,7 +2248,7 @@ export default function ERSchedulePage() {
                     <button
                       type="button"
                       onClick={() => setIsEditingDay(false)}
-                      className="text-2xs font-bold px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-colors"
+                      className="text-2xs font-bold px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-colors shrink-0 whitespace-nowrap"
                     >
                       취소
                     </button>
@@ -2260,7 +2260,7 @@ export default function ERSchedulePage() {
                       setSelectedDay(null);
                       setIsEditingDay(false);
                     }}
-                    className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                    className="p-1 rounded-lg text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-colors shrink-0"
                   >
                     <X className="w-4 h-4" />
                   </button>
