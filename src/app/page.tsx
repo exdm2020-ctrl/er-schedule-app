@@ -1913,7 +1913,7 @@ export default function ERSchedulePage() {
   };
 
   // [위젯 이미지 생성 함수]: 1:1 정방형 (1200x1200) 초고해상도 캘린더 위젯 PNG 렌더링
-  // 원본 달력과 100% 동일한 3-Slot Grid (D / M,H / N) 구성 및 현우 노란색 하이라이트 복제
+  // 완벽한 칸/뱃지 높이 통일(Uniform Spacing) + 텍스트 대폭 확대 + 중앙 정렬 통일
   const generateSquareWidgetImage = async (year: number, month: number): Promise<{ dataUrl: string; file: File } | null> => {
     if (typeof window === 'undefined') return null;
 
@@ -1929,7 +1929,7 @@ export default function ERSchedulePage() {
 
     // 2. 상단 헤더: 해당 스케줄 해당 월 ("YYYY년 M월")
     ctx.fillStyle = '#ffffff';
-    ctx.font = '900 42px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    ctx.font = '900 46px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(`${year}년 ${month}월`, 36, 52);
@@ -1959,13 +1959,13 @@ export default function ERSchedulePage() {
       ? `현우 당직 ${mTotal}회 (D ${mD} · H ${mH} · M ${mM} · N ${mN})`
       : `현우 당직 ${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`;
 
-    ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
-    const badgeW = ctx.measureText(badgeStatsText).width + 32;
+    ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    const badgeW = ctx.measureText(badgeStatsText).width + 36;
     const badgeX = 1200 - 36 - badgeW;
-    const badgeY = 30;
+    const badgeY = 28;
 
     ctx.fillStyle = '#18181b';
-    drawRoundRect(ctx, badgeX, badgeY, badgeW, 44, 12);
+    drawRoundRect(ctx, badgeX, badgeY, badgeW, 48, 12);
     ctx.fill();
     ctx.strokeStyle = '#27272a';
     ctx.lineWidth = 1.5;
@@ -1974,38 +1974,38 @@ export default function ERSchedulePage() {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fde047';
-    ctx.fillText('현우 당직 ', badgeX + 16, badgeY + 22);
+    ctx.fillText('현우 당직 ', badgeX + 18, badgeY + 24);
     const hyunwooW = ctx.measureText('현우 당직 ').width;
     ctx.fillStyle = '#e4e4e7';
     const restText = mH > 0
       ? `${mTotal}회 (D ${mD} · H ${mH} · M ${mM} · N ${mN})`
       : `${mTotal}회 (D ${mD} · M ${mM} · N ${mN})`;
-    ctx.fillText(restText, badgeX + 16 + hyunwooW, badgeY + 22);
+    ctx.fillText(restText, badgeX + 18 + hyunwooW, badgeY + 24);
 
     // 3. 요일 헤더 행 (일 ~ 토)
     const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
-    const gridLeft = 32;
+    const gridLeft = 28;
     const gridWidth = 1200 - (gridLeft * 2);
     const colWidth = gridWidth / 7;
-    const dayHeaderY = 108;
+    const dayHeaderY = 110;
 
-    ctx.font = 'bold 22px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+    ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     dayNames.forEach((dName, colIdx) => {
       const colX = gridLeft + (colIdx * colWidth) + (colWidth / 2);
       if (colIdx === 0) ctx.fillStyle = '#ef4444';
       else if (colIdx === 6) ctx.fillStyle = '#38bdf8';
-      else ctx.fillStyle = '#71717a';
+      else ctx.fillStyle = '#a1a1aa';
       ctx.fillText(dName, colX, dayHeaderY);
     });
 
     // 구분선
     ctx.strokeStyle = '#27272a';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(gridLeft, dayHeaderY + 22);
-    ctx.lineTo(gridLeft + gridWidth, dayHeaderY + 22);
+    ctx.moveTo(gridLeft, dayHeaderY + 24);
+    ctx.lineTo(gridLeft + gridWidth, dayHeaderY + 24);
     ctx.stroke();
 
     // 4. 날짜 그리드 계산
@@ -2014,7 +2014,7 @@ export default function ERSchedulePage() {
     const totalSlots = firstDayOfWeek + daysInMonth;
     const numRows = Math.ceil(totalSlots / 7);
 
-    const gridTopY = dayHeaderY + 32;
+    const gridTopY = dayHeaderY + 34;
     const availableGridHeight = 1200 - gridTopY - 24;
     const rowHeight = availableGridHeight / numRows;
     const cellGap = 5;
@@ -2022,7 +2022,17 @@ export default function ERSchedulePage() {
     const realToday = new Date();
     const realTodayStr = normalizeDateKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
 
-    // 슬롯 뱃지 그리기 내부 헬퍼 (원본 달력 구조 100% 보존 + 가독성 극대화 스마트 폰트 스케일링)
+    // 빈 슬롯 플레이스홀더 (모든 칸의 3단 높이를 100% 동일하게 통일)
+    const drawEmptySlotBadge = (bX: number, bY: number, bW: number, bH: number) => {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+      drawRoundRect(ctx, bX, bY, bW, bH, 6);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    };
+
+    // 슬롯 뱃지 그리기 (가독성 극대화 큰 폰트 + 완벽한 정중앙 정렬 + 오토피팅)
     const drawShiftSlotBadge = (
       shift: ShiftItem,
       bX: number,
@@ -2032,44 +2042,54 @@ export default function ERSchedulePage() {
     ) => {
       const hasHyunwoo = shift.hasTargetUser;
       const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
-      const isSubSlot = bH < 30; // 2분할 슬롯(주말 H+M) 여부 판별
-      const baseFontSize = isSubSlot ? Math.min(13, Math.max(11, bH * 0.52)) : Math.min(17, Math.max(15, bH * 0.36));
-      const badgeRadius = isSubSlot ? 4 : 6;
+      const isHalfSlot = bW < 100; // 가로 2분할(주말 H+M) 여부 판별
+      const baseFontSize = isHalfSlot
+        ? Math.min(15.5, Math.max(13, bH * 0.35))
+        : Math.min(20.5, Math.max(17, bH * 0.42));
+      const badgeRadius = 6;
+
+      let namesText = shift.workers.join('/');
+      let currentSize = baseFontSize;
+      const minSize = isHalfSlot ? 10.5 : 12.5;
+      const maxTextW = bW - (isHalfSlot ? 8 : 12);
+
+      // 텍스트 너비 오토피팅 계산
+      ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+      const codeStr = displayCode + ' ';
+      let combinedStr = `${codeStr}${namesText}`;
+
+      while (currentSize > minSize && ctx.measureText(combinedStr).width > maxTextW) {
+        currentSize -= 0.5;
+        ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+      }
+
+      if (ctx.measureText(combinedStr).width > maxTextW) {
+        while (namesText.length > 2 && ctx.measureText(`${codeStr}${namesText}..`).width > maxTextW) {
+          namesText = namesText.slice(0, -1);
+        }
+        namesText += '..';
+        combinedStr = `${codeStr}${namesText}`;
+      }
+
+      const totalContentW = ctx.measureText(combinedStr).width;
+      const centerY = bY + (bH / 2);
 
       if (hasHyunwoo) {
-        // [현우 근무일]: 선명한 노란색(#fde047) 배경 + 칠흑 검정 볼드 + 중앙 정렬 (이름 크기 대폭 확대)
+        // [현우 근무일]: 선명한 노란색(#fde047) 배경 + 칠흑 검정 볼드 + 정중앙 정렬
         ctx.fillStyle = '#fde047';
         drawRoundRect(ctx, bX, bY, bW, bH, badgeRadius);
         ctx.fill();
         ctx.strokeStyle = '#eab308';
-        ctx.lineWidth = 1.2;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#000000';
-
-        let textContent = `${displayCode} ${shift.workers.join('/')}`;
-        let currentSize = baseFontSize;
-        const minSize = isSubSlot ? 9.5 : 12;
-        const maxTextW = bW - 10;
-
         ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
-        while (currentSize > minSize && ctx.measureText(textContent).width > maxTextW) {
-          currentSize -= 0.5;
-          ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
-        }
-
-        if (ctx.measureText(textContent).width > maxTextW) {
-          while (textContent.length > 2 && ctx.measureText(textContent + '..').width > maxTextW) {
-            textContent = textContent.slice(0, -1);
-          }
-          textContent += '..';
-        }
-
-        ctx.fillText(textContent, bX + (bW / 2), bY + (bH / 2));
+        ctx.fillText(combinedStr, bX + (bW / 2), centerY);
       } else {
-        // [타인 근무]: 다크 그레이 배경 + 선명한 코드와 시인성 높은 큰 근무자 이름
+        // [타인 근무]: 다크 그레이 배경 + 코드(슬레이트) & 근무자 이름(화이트) + 정중앙 정렬
         ctx.fillStyle = '#1e1e24';
         drawRoundRect(ctx, bX, bY, bW, bH, badgeRadius);
         ctx.fill();
@@ -2077,38 +2097,20 @@ export default function ERSchedulePage() {
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
+        const startX = bX + Math.max(3, (bW - totalContentW) / 2);
 
-        // 1) 근무 코드 (D, M, H, N 등)
-        const codeFontSize = Math.max(10.5, Math.round(baseFontSize * 0.92));
-        ctx.font = `800 ${codeFontSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
-        ctx.fillStyle = '#94a3b8'; // 또렷한 슬레이트 그레이
-        const padLeft = isSubSlot ? 5 : 7;
-        ctx.fillText(displayCode, bX + padLeft, bY + (bH / 2));
-        const codeW = ctx.measureText(displayCode + ' ').width;
+        // 1) 근무 코드
+        ctx.textAlign = 'left';
+        ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(codeStr, startX, centerY);
+        const codeW = ctx.measureText(codeStr).width;
 
-        // 2) 근무자 이름 (요청사항: 텍스트를 구조 틀어짐 없이 최대한 크게!)
-        let namesText = shift.workers.join('/');
-        let currentNameSize = baseFontSize;
-        const minNameSize = isSubSlot ? 9 : 11.5;
-        const maxNamesW = bW - padLeft - 6 - codeW;
-
-        ctx.font = `700 ${currentNameSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
-        while (currentNameSize > minNameSize && ctx.measureText(namesText).width > maxNamesW) {
-          currentNameSize -= 0.5;
-          ctx.font = `700 ${currentNameSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
-        }
-
-        if (ctx.measureText(namesText).width > maxNamesW) {
-          while (namesText.length > 2 && ctx.measureText(namesText + '..').width > maxNamesW) {
-            namesText = namesText.slice(0, -1);
-          }
-          namesText += '..';
-        }
-
-        ctx.fillStyle = '#f8fafc'; // 또렷하고 밝은 화이트
-        ctx.fillText(namesText, bX + padLeft + codeW, bY + (bH / 2));
+        // 2) 근무자 이름 (대폭 확대 + 깨끗한 화이트)
+        ctx.font = `800 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(namesText, startX + codeW, centerY);
       }
     };
 
@@ -2150,7 +2152,7 @@ export default function ERSchedulePage() {
           ctx.stroke();
         } else if (hasTargetUser) {
           ctx.strokeStyle = '#facc15'; // 선명한 골드 노랑
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 2.5;
           ctx.stroke();
         } else {
           ctx.strokeStyle = '#27272a';
@@ -2158,40 +2160,40 @@ export default function ERSchedulePage() {
           ctx.stroke();
         }
 
-        // 1) 날짜 숫자
+        // 1) 날짜 숫자 (대폭 확대: 26px 슈퍼볼드)
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        ctx.font = '900 20px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
+        ctx.font = '900 26px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
 
         if (isToday) ctx.fillStyle = '#34d399';
         else if (isSunday || isHoliday) ctx.fillStyle = '#f87171';
         else if (isSaturday) ctx.fillStyle = '#38bdf8';
         else ctx.fillStyle = '#f4f4f5';
 
-        ctx.fillText(String(dayNum), cellX + 7, cellY + 6);
+        ctx.fillText(String(dayNum), cellX + 8, cellY + 6);
         const dayNumW = ctx.measureText(String(dayNum)).width;
 
         // 오늘 뱃지
         if (isToday) {
           ctx.fillStyle = '#10b981';
-          drawRoundRect(ctx, cellX + 9 + dayNumW, cellY + 6, 28, 16, 4);
+          drawRoundRect(ctx, cellX + 11 + dayNumW, cellY + 7, 34, 18, 5);
           ctx.fill();
           ctx.fillStyle = '#022c22';
-          ctx.font = '900 9.5px sans-serif';
+          ctx.font = '900 11px sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText('오늘', cellX + 9 + dayNumW + 14, cellY + 14);
+          ctx.fillText('오늘', cellX + 11 + dayNumW + 17, cellY + 16);
         }
 
         // 공휴일 메모 (우측 상단 뱃지)
         if (dayData?.holidayNote) {
-          ctx.font = 'bold 10px -apple-system, sans-serif';
+          ctx.font = 'bold 11px -apple-system, sans-serif';
           const noteText = dayData.holidayNote.length > 5 ? dayData.holidayNote.slice(0, 4) + '..' : dayData.holidayNote;
-          const noteW = ctx.measureText(noteText).width + 8;
+          const noteW = ctx.measureText(noteText).width + 10;
           const noteX = cellX + cellW - noteW - 6;
 
           ctx.fillStyle = 'rgba(69, 10, 10, 0.85)';
-          drawRoundRect(ctx, noteX, cellY + 6, noteW, 16, 4);
+          drawRoundRect(ctx, noteX, cellY + 7, noteW, 18, 5);
           ctx.fill();
           ctx.strokeStyle = 'rgba(225, 29, 72, 0.4)';
           ctx.lineWidth = 1;
@@ -2200,44 +2202,50 @@ export default function ERSchedulePage() {
           ctx.fillStyle = '#f87171';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(noteText, noteX + (noteW / 2), cellY + 14);
+          ctx.fillText(noteText, noteX + (noteW / 2), cellY + 16);
         }
 
-        // 2) [달력 줄맞춤 강제 3-Row Grid 슬롯]
+        // 2) [완벽한 칸/뱃지 높이 통일: 고정 3-Row Grid 슬롯]
         const dayShift = dayData?.shifts.find(s => s.code === 'D');
         const midShifts = dayData?.shifts.filter(s => s.code === 'M1' || s.code === 'M2' || s.code === 'M' || s.code === 'H') || [];
         const nightShift = dayData?.shifts.find(s => s.code === 'N');
 
-        const slotsStartY = cellY + 28;
-        const availableSlotsH = cellH - 34;
-        const slotH = availableSlotsH / 3;
+        const dateHeaderH = 34;
+        const slotsStartY = cellY + dateHeaderH;
+        const availableSlotsH = cellH - dateHeaderH - 6;
+        const slotGap = 3;
+        const slotH = (availableSlotsH - (slotGap * 2)) / 3;
         const badgeW = cellW - 8;
         const badgeX = cellX + 4;
 
-        // Slot 1: Day (D)
-        const slot1Y = slotsStartY + 2;
-        const slot1H = slotH - 4;
+        // Slot 1: Day (D) - 항상 동일한 고정 Y와 slotH 규격
+        const slot1Y = slotsStartY;
         if (dayShift) {
-          drawShiftSlotBadge(dayShift, badgeX, slot1Y, badgeW, slot1H);
+          drawShiftSlotBadge(dayShift, badgeX, slot1Y, badgeW, slotH);
+        } else {
+          drawEmptySlotBadge(badgeX, slot1Y, badgeW, slotH);
         }
 
-        // Slot 2: Mid / Helper (M, H, M1, M2)
-        const slot2Y = slotsStartY + slotH + 2;
-        const slot2H = slotH - 4;
+        // Slot 2: Mid / Helper (M, H) - 항상 동일한 고정 Y와 slotH 규격
+        const slot2Y = slotsStartY + slotH + slotGap;
         if (midShifts.length === 1) {
-          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, slot2H);
+          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, slotH);
         } else if (midShifts.length >= 2) {
-          // 주말/공휴일 헬퍼(H)와 미드(M) 2개가 함께 있는 경우: 위아래로 깔끔히 2분할
-          const subH = (slot2H - 2) / 2;
-          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, subH);
-          drawShiftSlotBadge(midShifts[1], badgeX, slot2Y + subH + 2, badgeW, subH);
+          // 주말/공휴일 헬퍼(H)와 미드(M) 2개인 경우: 가로(좌/우) 2분할로 세로 높이(slotH)를 100% 동일하게 통일!
+          const halfGap = 3;
+          const halfW = (badgeW - halfGap) / 2;
+          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, halfW, slotH);
+          drawShiftSlotBadge(midShifts[1], badgeX + halfW + halfGap, slot2Y, halfW, slotH);
+        } else {
+          drawEmptySlotBadge(badgeX, slot2Y, badgeW, slotH);
         }
 
-        // Slot 3: Night (N)
-        const slot3Y = slotsStartY + (slotH * 2) + 2;
-        const slot3H = slotH - 4;
+        // Slot 3: Night (N) - 항상 동일한 고정 Y와 slotH 규격
+        const slot3Y = slotsStartY + (slotH + slotGap) * 2;
         if (nightShift) {
-          drawShiftSlotBadge(nightShift, badgeX, slot3Y, badgeW, slot3H);
+          drawShiftSlotBadge(nightShift, badgeX, slot3Y, badgeW, slotH);
+        } else {
+          drawEmptySlotBadge(badgeX, slot3Y, badgeW, slotH);
         }
       }
     }
