@@ -2022,7 +2022,7 @@ export default function ERSchedulePage() {
     const realToday = new Date();
     const realTodayStr = normalizeDateKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
 
-    // 슬롯 뱃지 그리기 내부 헬퍼 (원본 renderShiftSlot과 100% 동일한 룰)
+    // 슬롯 뱃지 그리기 내부 헬퍼 (원본 달력 구조 100% 보존 + 가독성 극대화 스마트 폰트 스케일링)
     const drawShiftSlotBadge = (
       shift: ShiftItem,
       bX: number,
@@ -2032,65 +2032,83 @@ export default function ERSchedulePage() {
     ) => {
       const hasHyunwoo = shift.hasTargetUser;
       const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
+      const isSubSlot = bH < 30; // 2분할 슬롯(주말 H+M) 여부 판별
+      const baseFontSize = isSubSlot ? Math.min(13, Math.max(11, bH * 0.52)) : Math.min(17, Math.max(15, bH * 0.36));
+      const badgeRadius = isSubSlot ? 4 : 6;
 
       if (hasHyunwoo) {
-        // [현우 근무일]: 선명한 노란색(#fde047) 배경 + 칠흑 검정 볼드 + 가운데 정렬
+        // [현우 근무일]: 선명한 노란색(#fde047) 배경 + 칠흑 검정 볼드 + 중앙 정렬 (이름 크기 대폭 확대)
         ctx.fillStyle = '#fde047';
-        drawRoundRect(ctx, bX, bY, bW, bH, 5);
+        drawRoundRect(ctx, bX, bY, bW, bH, badgeRadius);
         ctx.fill();
         ctx.strokeStyle = '#eab308';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.2;
         ctx.stroke();
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = '900 12px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
         ctx.fillStyle = '#000000';
 
         let textContent = `${displayCode} ${shift.workers.join('/')}`;
-        if (ctx.measureText(textContent).width > bW - 8) {
-          ctx.font = '900 10.5px -apple-system, sans-serif';
-          if (ctx.measureText(textContent).width > bW - 6) {
-            while (textContent.length > 3 && ctx.measureText(textContent + '..').width > bW - 6) {
-              textContent = textContent.slice(0, -1);
-            }
-            textContent += '..';
-          }
+        let currentSize = baseFontSize;
+        const minSize = isSubSlot ? 9.5 : 12;
+        const maxTextW = bW - 10;
+
+        ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+        while (currentSize > minSize && ctx.measureText(textContent).width > maxTextW) {
+          currentSize -= 0.5;
+          ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
         }
+
+        if (ctx.measureText(textContent).width > maxTextW) {
+          while (textContent.length > 2 && ctx.measureText(textContent + '..').width > maxTextW) {
+            textContent = textContent.slice(0, -1);
+          }
+          textContent += '..';
+        }
+
         ctx.fillText(textContent, bX + (bW / 2), bY + (bH / 2));
       } else {
-        // [타인 근무]: 다크 그레이 배경 + 코드/근무자 무채색
-        ctx.fillStyle = '#222226';
-        drawRoundRect(ctx, bX, bY, bW, bH, 5);
+        // [타인 근무]: 다크 그레이 배경 + 선명한 코드와 시인성 높은 큰 근무자 이름
+        ctx.fillStyle = '#1e1e24';
+        drawRoundRect(ctx, bX, bY, bW, bH, badgeRadius);
         ctx.fill();
-        ctx.strokeStyle = '#323238';
+        ctx.strokeStyle = '#2e2e38';
         ctx.lineWidth = 1;
         ctx.stroke();
 
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
 
-        // 코드
-        ctx.fillStyle = '#71717a';
-        ctx.fillText(displayCode, bX + 6, bY + (bH / 2));
+        // 1) 근무 코드 (D, M, H, N 등)
+        const codeFontSize = Math.max(10.5, Math.round(baseFontSize * 0.92));
+        ctx.font = `800 ${codeFontSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+        ctx.fillStyle = '#94a3b8'; // 또렷한 슬레이트 그레이
+        const padLeft = isSubSlot ? 5 : 7;
+        ctx.fillText(displayCode, bX + padLeft, bY + (bH / 2));
         const codeW = ctx.measureText(displayCode + ' ').width;
 
-        // 근무자들
-        ctx.fillStyle = '#d4d4d8';
-        ctx.font = '600 11px -apple-system, sans-serif';
+        // 2) 근무자 이름 (요청사항: 텍스트를 구조 틀어짐 없이 최대한 크게!)
         let namesText = shift.workers.join('/');
-        const maxNamesW = bW - 12 - codeW;
-        if (ctx.measureText(namesText).width > maxNamesW) {
-          ctx.font = '600 9.5px -apple-system, sans-serif';
-          if (ctx.measureText(namesText).width > maxNamesW) {
-            while (namesText.length > 2 && ctx.measureText(namesText + '..').width > maxNamesW) {
-              namesText = namesText.slice(0, -1);
-            }
-            namesText += '..';
-          }
+        let currentNameSize = baseFontSize;
+        const minNameSize = isSubSlot ? 9 : 11.5;
+        const maxNamesW = bW - padLeft - 6 - codeW;
+
+        ctx.font = `700 ${currentNameSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
+        while (currentNameSize > minNameSize && ctx.measureText(namesText).width > maxNamesW) {
+          currentNameSize -= 0.5;
+          ctx.font = `700 ${currentNameSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
         }
-        ctx.fillText(namesText, bX + 6 + codeW, bY + (bH / 2));
+
+        if (ctx.measureText(namesText).width > maxNamesW) {
+          while (namesText.length > 2 && ctx.measureText(namesText + '..').width > maxNamesW) {
+            namesText = namesText.slice(0, -1);
+          }
+          namesText += '..';
+        }
+
+        ctx.fillStyle = '#f8fafc'; // 또렷하고 밝은 화이트
+        ctx.fillText(namesText, bX + padLeft + codeW, bY + (bH / 2));
       }
     };
 
