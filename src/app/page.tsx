@@ -2754,43 +2754,45 @@ export default function ERSchedulePage() {
               </div>
             </div>
 
-            {/* 내 근무 요약 바 및 [현우만 보기] & [위젯 이미지] 버튼 */}
-            <div className="flex items-center justify-between text-2xs pt-0.5 text-zinc-400">
-              <div className="flex items-center gap-1.5 overflow-hidden">
-                <span className="text-yellow-400 font-extrabold shrink-0">현우 {currentMonth}월:</span>
-                <span className="text-zinc-200 font-bold shrink-0">{myStatsThisMonth.total}회</span>
-                <span className="text-zinc-600">|</span>
-                <span className="text-sky-400 shrink-0">D {myStatsThisMonth.dCount}</span>
+            {/* 내 근무 요약 바 및 [나만 보기] & [위젯] 버튼 (가림 없는 1줄 컴팩트 레이아웃) */}
+            <div className="flex items-center justify-between text-2xs pt-1 text-zinc-400 w-full overflow-hidden">
+              <div className="flex items-center gap-1 min-w-0 shrink whitespace-nowrap">
+                <span className="text-yellow-400 font-black shrink-0">현우:</span>
+                <span className="text-zinc-100 font-extrabold shrink-0">{myStatsThisMonth.total}회</span>
+                <span className="text-zinc-600 shrink-0">|</span>
+                <span className="text-sky-400 font-bold shrink-0">D {myStatsThisMonth.dCount}</span>
                 {myStatsThisMonth.hCount > 0 && (
-                  <span className="text-emerald-400 shrink-0">H {myStatsThisMonth.hCount}</span>
+                  <span className="text-emerald-400 font-bold shrink-0">H {myStatsThisMonth.hCount}</span>
                 )}
-                <span className="text-amber-400 shrink-0">M {myStatsThisMonth.mCount}</span>
-                <span className="text-indigo-400 shrink-0">N {myStatsThisMonth.nCount}</span>
+                <span className="text-amber-400 font-bold shrink-0">M {myStatsThisMonth.mCount}</span>
+                <span className="text-indigo-400 font-bold shrink-0">N {myStatsThisMonth.nCount}</span>
               </div>
 
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex items-center gap-1 shrink-0 ml-1.5">
                 {/* 1:1 정방형 위젯용 이미지 저장 버튼 */}
                 <button
                   type="button"
                   onClick={handleCreateWidgetImage}
                   disabled={isGeneratingWidget}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-2xs transition-all border bg-zinc-900 hover:bg-zinc-800 text-sky-400 border-zinc-700 hover:border-sky-400/60 active:scale-95 shadow-xs"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-lg font-bold text-2xs transition-all border bg-zinc-900 hover:bg-zinc-800 text-sky-400 border-zinc-700 hover:border-sky-400/60 active:scale-95 shadow-xs"
                   title="현재 월 1:1 정방형 위젯용 이미지 다운로드"
                 >
-                  <ImageIcon className="w-3 h-3 text-sky-400" />
-                  <span>{isGeneratingWidget ? '생성 중...' : '위젯 저장'}</span>
+                  <ImageIcon className="w-2.5 h-2.5 text-sky-400" />
+                  <span>{isGeneratingWidget ? '생성중' : '위젯'}</span>
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => setOnlyMyShifts(!onlyMyShifts)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-2xs transition-all border ${
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-lg font-bold text-2xs transition-all border active:scale-95 shadow-xs ${
                     onlyMyShifts
-                      ? 'bg-yellow-400 text-black border-yellow-400 shadow-xs'
+                      ? 'bg-yellow-400 text-black border-yellow-400 font-extrabold'
                       : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-800'
                   }`}
+                  title="내 근무만 강조하여 보기"
                 >
-                  <Sparkles className="w-3 h-3" />
-                  <span>현우만</span>
+                  <Sparkles className="w-2.5 h-2.5" />
+                  <span>나만</span>
                 </button>
               </div>
             </div>
