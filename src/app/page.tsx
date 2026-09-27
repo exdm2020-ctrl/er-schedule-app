@@ -2022,10 +2022,10 @@ export default function ERSchedulePage() {
     const realToday = new Date();
     const realTodayStr = normalizeDateKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
 
-    // 빈 슬롯 플레이스홀더 (모든 칸의 3단 높이를 100% 동일하게 통일)
+    // 빈 슬롯 플레이스홀더 (모든 칸의 4단 높이를 100% 동일하게 통일)
     const drawEmptySlotBadge = (bX: number, bY: number, bW: number, bH: number) => {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
-      drawRoundRect(ctx, bX, bY, bW, bH, 6);
+      drawRoundRect(ctx, bX, bY, bW, bH, 5);
       ctx.fill();
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
       ctx.lineWidth = 1;
@@ -2042,16 +2042,13 @@ export default function ERSchedulePage() {
     ) => {
       const hasHyunwoo = shift.hasTargetUser;
       const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
-      const isHalfSlot = bW < 100; // 가로 2분할(주말 H+M) 여부 판별
-      const baseFontSize = isHalfSlot
-        ? Math.min(15.5, Math.max(13, bH * 0.35))
-        : Math.min(20.5, Math.max(17, bH * 0.42));
-      const badgeRadius = 6;
+      const baseFontSize = Math.min(18.5, Math.max(14.5, bH * 0.44));
+      const badgeRadius = 5;
 
       let namesText = shift.workers.join('/');
       let currentSize = baseFontSize;
-      const minSize = isHalfSlot ? 10.5 : 12.5;
-      const maxTextW = bW - (isHalfSlot ? 8 : 12);
+      const minSize = 11;
+      const maxTextW = bW - 10;
 
       // 텍스트 너비 오토피팅 계산
       ctx.font = `900 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
@@ -2134,7 +2131,6 @@ export default function ERSchedulePage() {
 
         const dateStr = normalizeDateKey(year, month, dayNum);
         const dayData = scheduleMap.get(dateStr);
-        const isToday = dateStr === realTodayStr;
         const isSunday = c === 0;
         const isSaturday = c === 6;
         const isHoliday = Boolean(dayData?.holidayNote);
@@ -2145,12 +2141,8 @@ export default function ERSchedulePage() {
         drawRoundRect(ctx, cellX, cellY, cellW, cellH, 8);
         ctx.fill();
 
-        // 셀 테두리 (오늘 초록 / 현우 노랑 / 일반 다크)
-        if (isToday) {
-          ctx.strokeStyle = '#10b981'; // 선명한 에메랄드 초록
-          ctx.lineWidth = 3.5;
-          ctx.stroke();
-        } else if (hasTargetUser) {
+        // 셀 테두리: [위젯 이미지 생성 시 오늘 날짜 초록 강조 제거] - 오직 현우 골드 노랑, 일반 다크
+        if (hasTargetUser) {
           ctx.strokeStyle = '#facc15'; // 선명한 골드 노랑
           ctx.lineWidth = 2.5;
           ctx.stroke();
@@ -2160,30 +2152,16 @@ export default function ERSchedulePage() {
           ctx.stroke();
         }
 
-        // 1) 날짜 숫자 (대폭 확대: 26px 슈퍼볼드)
+        // 1) 날짜 숫자 (대폭 확대: 26px 슈퍼볼드, 오늘 초록 강조 제거)
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.font = '900 26px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif';
 
-        if (isToday) ctx.fillStyle = '#34d399';
-        else if (isSunday || isHoliday) ctx.fillStyle = '#f87171';
+        if (isSunday || isHoliday) ctx.fillStyle = '#f87171';
         else if (isSaturday) ctx.fillStyle = '#38bdf8';
         else ctx.fillStyle = '#f4f4f5';
 
         ctx.fillText(String(dayNum), cellX + 8, cellY + 6);
-        const dayNumW = ctx.measureText(String(dayNum)).width;
-
-        // 오늘 뱃지
-        if (isToday) {
-          ctx.fillStyle = '#10b981';
-          drawRoundRect(ctx, cellX + 11 + dayNumW, cellY + 7, 34, 18, 5);
-          ctx.fill();
-          ctx.fillStyle = '#022c22';
-          ctx.font = '900 11px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('오늘', cellX + 11 + dayNumW + 17, cellY + 16);
-        }
 
         // 공휴일 메모 (우측 상단 뱃지)
         if (dayData?.holidayNote) {
@@ -2205,20 +2183,28 @@ export default function ERSchedulePage() {
           ctx.fillText(noteText, noteX + (noteW / 2), cellY + 16);
         }
 
-        // 2) [완벽한 칸/뱃지 높이 통일: 고정 3-Row Grid 슬롯]
+        // 2) [4그리드(4구역) 규격 통일 슬롯: D / H(또는 M1) / M(또는 M2) / N]
         const dayShift = dayData?.shifts.find(s => s.code === 'D');
-        const midShifts = dayData?.shifts.filter(s => s.code === 'M1' || s.code === 'M2' || s.code === 'M' || s.code === 'H') || [];
+        const helperShift = dayData?.shifts.find(s => s.code === 'H');
+        const midOnlyShifts = dayData?.shifts.filter(s => s.code === 'M' || s.code === 'M1' || s.code === 'M2') || [];
+        let slot2Shift = helperShift;
+        let slot3Shift = midOnlyShifts[0];
+
+        if (!slot2Shift && midOnlyShifts.length >= 2) {
+          slot2Shift = midOnlyShifts[0];
+          slot3Shift = midOnlyShifts[1];
+        }
         const nightShift = dayData?.shifts.find(s => s.code === 'N');
 
         const dateHeaderH = 34;
         const slotsStartY = cellY + dateHeaderH;
         const availableSlotsH = cellH - dateHeaderH - 6;
-        const slotGap = 3;
-        const slotH = (availableSlotsH - (slotGap * 2)) / 3;
+        const slotGap = 2.5;
+        const slotH = (availableSlotsH - (slotGap * 3)) / 4;
         const badgeW = cellW - 8;
         const badgeX = cellX + 4;
 
-        // Slot 1: Day (D) - 항상 동일한 고정 Y와 slotH 규격
+        // Slot 1: Day (D)
         const slot1Y = slotsStartY;
         if (dayShift) {
           drawShiftSlotBadge(dayShift, badgeX, slot1Y, badgeW, slotH);
@@ -2226,26 +2212,28 @@ export default function ERSchedulePage() {
           drawEmptySlotBadge(badgeX, slot1Y, badgeW, slotH);
         }
 
-        // Slot 2: Mid / Helper (M, H) - 항상 동일한 고정 Y와 slotH 규격
-        const slot2Y = slotsStartY + slotH + slotGap;
-        if (midShifts.length === 1) {
-          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, slotH);
-        } else if (midShifts.length >= 2) {
-          // 주말/공휴일 헬퍼(H)와 미드(M) 2개인 경우: 가로(좌/우) 2분할로 세로 높이(slotH)를 100% 동일하게 통일!
-          const halfGap = 3;
-          const halfW = (badgeW - halfGap) / 2;
-          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, halfW, slotH);
-          drawShiftSlotBadge(midShifts[1], badgeX + halfW + halfGap, slot2Y, halfW, slotH);
+        // Slot 2: Helper (H) 또는 M1
+        const slot2Y = slotsStartY + (slotH + slotGap);
+        if (slot2Shift) {
+          drawShiftSlotBadge(slot2Shift, badgeX, slot2Y, badgeW, slotH);
         } else {
           drawEmptySlotBadge(badgeX, slot2Y, badgeW, slotH);
         }
 
-        // Slot 3: Night (N) - 항상 동일한 고정 Y와 slotH 규격
+        // Slot 3: Mid (M) 또는 M2
         const slot3Y = slotsStartY + (slotH + slotGap) * 2;
-        if (nightShift) {
-          drawShiftSlotBadge(nightShift, badgeX, slot3Y, badgeW, slotH);
+        if (slot3Shift) {
+          drawShiftSlotBadge(slot3Shift, badgeX, slot3Y, badgeW, slotH);
         } else {
           drawEmptySlotBadge(badgeX, slot3Y, badgeW, slotH);
+        }
+
+        // Slot 4: Night (N)
+        const slot4Y = slotsStartY + (slotH + slotGap) * 3;
+        if (nightShift) {
+          drawShiftSlotBadge(nightShift, badgeX, slot4Y, badgeW, slotH);
+        } else {
+          drawEmptySlotBadge(badgeX, slot4Y, badgeW, slotH);
         }
       }
     }
