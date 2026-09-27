@@ -2022,7 +2022,7 @@ export default function ERSchedulePage() {
     const realToday = new Date();
     const realTodayStr = normalizeDateKey(realToday.getFullYear(), realToday.getMonth() + 1, realToday.getDate());
 
-    // 빈 슬롯 플레이스홀더 (3단 슬롯 규격 유지)
+    // 빈 슬롯 플레이스홀더 (4그리드 규격 100% 동일 유지)
     const drawEmptySlotBadge = (bX: number, bY: number, bW: number, bH: number) => {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
       drawRoundRect(ctx, bX, bY, bW, bH, 5);
@@ -2032,7 +2032,7 @@ export default function ERSchedulePage() {
       ctx.stroke();
     };
 
-    // 슬롯 뱃지 그리기 (가독성 극대화 큰 폰트 + 완벽한 정중앙 정렬 + Max-scale 오토피팅)
+    // 슬롯 뱃지 그리기 (4구역 100% 동일 폰트 크기 + 완벽한 정중앙 정렬 + Max-scale 오토피팅)
     const drawShiftSlotBadge = (
       shift: ShiftItem,
       bX: number,
@@ -2042,15 +2042,13 @@ export default function ERSchedulePage() {
     ) => {
       const hasHyunwoo = shift.hasTargetUser;
       const displayCode = (shift.code === 'M1' || shift.code === 'M2') ? 'M' : shift.code;
-      const isSubSlot = bH < 30; // 2분할 슬롯(주말 H+M) 여부 판별
-      const baseFontSize = isSubSlot
-        ? Math.min(14.5, Math.max(12, bH * 0.55))
-        : Math.min(21.5, Math.max(17.5, bH * 0.42));
-      const badgeRadius = isSubSlot ? 4 : 6;
+      // D, H, M, N 모든 구역이 완전히 동일한 높이(bH)를 공유하므로 폰트 크기도 100% 균등하게 통일!
+      const baseFontSize = Math.min(18.5, Math.max(14.5, bH * 0.45));
+      const badgeRadius = 5;
 
       let namesText = shift.workers.join('/');
       let currentSize = baseFontSize;
-      const minSize = isSubSlot ? 10 : 12.5;
+      const minSize = 11;
       const maxTextW = bW - 10;
 
       // 텍스트 너비 오토피팅 계산 (최적 한계치 Max-scale)
@@ -2107,7 +2105,7 @@ export default function ERSchedulePage() {
         ctx.fillText(codeStr, startX, centerY);
         const codeW = ctx.measureText(codeStr).width;
 
-        // 2) 근무자 이름 (대폭 확대 + 깨끗한 화이트)
+        // 2) 근무자 이름 (동일한 크기 + 선명한 화이트)
         ctx.font = `800 ${currentSize}px -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif`;
         ctx.fillStyle = '#ffffff';
         ctx.fillText(namesText, startX + codeW, centerY);
@@ -2186,46 +2184,67 @@ export default function ERSchedulePage() {
           ctx.fillText(noteText, noteX + (noteW / 2), cellY + 16);
         }
 
-        // 2) [메인 화면과 100% 동일한 3-Row Grid 슬롯 구조]
+        // 2) [4그리드 완벽 통일 슬롯: D, M1(H), M2(M), N - 높이/패딩/폰트 100% 동일]
         const dayShift = dayData?.shifts.find(s => s.code === 'D');
-        const midShifts = dayData?.shifts.filter(s => s.code === 'M1' || s.code === 'M2' || s.code === 'M' || s.code === 'H') || [];
+        const helperShift = dayData?.shifts.find(s => s.code === 'H');
+        const midShifts = dayData?.shifts.filter(s => s.code === 'M' || s.code === 'M1' || s.code === 'M2') || [];
         const nightShift = dayData?.shifts.find(s => s.code === 'N');
+
+        let slot1Shift = dayShift;
+        let slot2Shift: ShiftItem | undefined = undefined;
+        let slot3Shift: ShiftItem | undefined = undefined;
+        let slot4Shift = nightShift;
+
+        if (helperShift) {
+          slot2Shift = helperShift;
+          slot3Shift = midShifts[0];
+        } else {
+          if (midShifts.length >= 2) {
+            slot2Shift = midShifts[0];
+            slot3Shift = midShifts[1];
+          } else if (midShifts.length === 1) {
+            slot2Shift = midShifts[0];
+          }
+        }
 
         const dateHeaderH = 34;
         const slotsStartY = cellY + dateHeaderH;
         const availableSlotsH = cellH - dateHeaderH - 6;
-        const slotGap = 3;
-        const slotH = (availableSlotsH - (slotGap * 2)) / 3;
+        const slotGap = 2.5;
+        const slotH = (availableSlotsH - (slotGap * 3)) / 4;
         const badgeW = cellW - 8;
         const badgeX = cellX + 4;
 
         // Slot 1: Day (D)
         const slot1Y = slotsStartY;
-        if (dayShift) {
-          drawShiftSlotBadge(dayShift, badgeX, slot1Y, badgeW, slotH);
+        if (slot1Shift) {
+          drawShiftSlotBadge(slot1Shift, badgeX, slot1Y, badgeW, slotH);
         } else {
           drawEmptySlotBadge(badgeX, slot1Y, badgeW, slotH);
         }
 
-        // Slot 2: Mid / Helper (M, H)
-        const slot2Y = slotsStartY + slotH + slotGap;
-        if (midShifts.length === 1) {
-          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, slotH);
-        } else if (midShifts.length >= 2) {
-          // 주말/공휴일 헬퍼(H)와 미드(M) 2개인 경우: 위아래로 깔끔히 2분할
-          const subH = (slotH - 2) / 2;
-          drawShiftSlotBadge(midShifts[0], badgeX, slot2Y, badgeW, subH);
-          drawShiftSlotBadge(midShifts[1], badgeX, slot2Y + subH + 2, badgeW, subH);
+        // Slot 2: Helper (H) 또는 Mid 1
+        const slot2Y = slotsStartY + (slotH + slotGap);
+        if (slot2Shift) {
+          drawShiftSlotBadge(slot2Shift, badgeX, slot2Y, badgeW, slotH);
         } else {
           drawEmptySlotBadge(badgeX, slot2Y, badgeW, slotH);
         }
 
-        // Slot 3: Night (N)
+        // Slot 3: Mid (M) 또는 Mid 2
         const slot3Y = slotsStartY + (slotH + slotGap) * 2;
-        if (nightShift) {
-          drawShiftSlotBadge(nightShift, badgeX, slot3Y, badgeW, slotH);
+        if (slot3Shift) {
+          drawShiftSlotBadge(slot3Shift, badgeX, slot3Y, badgeW, slotH);
         } else {
           drawEmptySlotBadge(badgeX, slot3Y, badgeW, slotH);
+        }
+
+        // Slot 4: Night (N)
+        const slot4Y = slotsStartY + (slotH + slotGap) * 3;
+        if (slot4Shift) {
+          drawShiftSlotBadge(slot4Shift, badgeX, slot4Y, badgeW, slotH);
+        } else {
+          drawEmptySlotBadge(badgeX, slot4Y, badgeW, slotH);
         }
       }
     }
